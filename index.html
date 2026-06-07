@@ -11,6 +11,69 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>シフト・請求書管理</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
+  import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged }
+    from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
+  import { getFirestore, doc, setDoc, onSnapshot }
+    from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB4JpPFCP0tigTHFaHkwVihEBfa24-oaJ8",
+    authDomain: "shift-app-1fa59.firebaseapp.com",
+    projectId: "shift-app-1fa59",
+    storageBucket: "shift-app-1fa59.firebasestorage.app",
+    messagingSenderId: "1014397065555",
+    appId: "1:1014397065555:web:d681d7b76c565313b569a6",
+    measurementId: "G-3CBJC8DS70"
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+  let unsubscribe = null;
+
+  window.firebaseSignIn = async function() {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch(e) { alert('ログインに失敗しました: ' + e.message); }
+  };
+
+  window.firebaseSignOut = async function() {
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    await signOut(auth);
+  };
+
+  window.saveToFirebase = async function(shifts, rates) {
+    const user = auth.currentUser; if (!user) return;
+    try {
+      await setDoc(doc(db, 'users', user.uid), { shifts, rates, updatedAt: Date.now() });
+      document.getElementById('sync-status').textContent = '最終同期: ' + new Date().toLocaleTimeString('ja-JP');
+    } catch(e) { console.warn('Firebase save error', e); }
+  };
+
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      document.getElementById('fb-signin-area').style.display  = 'none';
+      document.getElementById('fb-signout-area').style.display = 'block';
+      document.getElementById('fb-user-name').textContent = user.displayName || user.email;
+      unsubscribe = onSnapshot(doc(db, 'users', user.uid), snap => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.shifts) window._fbShifts = data.shifts;
+          if (data.rates)  window._fbRates  = data.rates;
+          if (typeof window.onFirebaseDataLoaded === 'function') window.onFirebaseDataLoaded();
+        }
+      });
+    } else {
+      document.getElementById('fb-signin-area').style.display  = 'block';
+      document.getElementById('fb-signout-area').style.display = 'none';
+      document.getElementById('fb-user-name').textContent = '';
+      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    }
+  });
+</script>
 <style>
   :root {
     --bg: #ffffff; --bg2: #f5f5f5; --bg3: #eeeeee;
@@ -68,19 +131,21 @@
   .btn-warn { color: var(--warning-text); border-color: var(--close-color); font-size: 12px; padding: 5px 10px; }
   .btn-reopen { color: var(--success-text); border-color: var(--success-text); font-size: 12px; padding: 5px 10px; }
   .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .alert { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
+  .alert { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
   .alert-danger { background: var(--danger-bg); color: var(--danger-text); border: 0.5px solid var(--danger-text); }
   .month-nav { display: flex; align-items: center; gap: 8px; }
   .month-nav span { font-size: 15px; font-weight: 500; min-width: 80px; text-align: center; }
   .shift-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
   .shift-item:last-child { border-bottom: none; }
+  .shift-item.has-conflict { background: var(--danger-bg); border-radius: var(--radius-sm); padding: 10px 8px; margin-bottom: 2px; border-bottom: none; }
   .shift-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
   .shift-body { flex: 1; min-width: 0; }
   .shift-title { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .shift-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
   .shift-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
   .closed-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--warning-bg); color: var(--warning-text); font-weight: 500; white-space: nowrap; }
-  .gcal-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--success-bg); color: var(--success-text); font-weight: 500; white-space: nowrap; }
+  .gcal-badge { font-size: 11px; padding: 2px 6px; border-radius: 20px; background: var(--success-bg); color: var(--success-text); font-weight: 500; }
+  .conflict-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--danger-bg); color: var(--danger-text); font-weight: 500; white-space: nowrap; }
   .invoice-out { font-family: 'Courier New', monospace; font-size: 14px; line-height: 2; white-space: pre-wrap; background: var(--bg2); border-radius: var(--radius-sm); padding: 14px; color: var(--text); min-height: 160px; }
   .week-block { border: 0.5px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
   .week-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--bg2); cursor: pointer; font-size: 14px; font-weight: 500; }
@@ -92,11 +157,12 @@
   .day-btn:disabled { opacity: .3; cursor: default; }
   .rate-note { font-size: 12px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
   .divider { height: 0.5px; background: var(--border); margin: 12px 0; }
-  .gcal-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
+  .gcal-box, .firebase-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
   .flash { font-size: 13px; margin-top: 8px; display: none; padding: 6px 10px; border-radius: var(--radius-sm); }
-  .flash.ok { background: var(--success-bg); color: var(--success-text); display: block; }
-  .flash.err { background: var(--danger-bg); color: var(--danger-text); display: block; }
-  .gcal-connected { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); }
+  .flash.ok  { background: var(--success-bg); color: var(--success-text); display: block; }
+  .flash.err { background: var(--danger-bg);  color: var(--danger-text);  display: block; }
+  .gcal-connected, .fb-connected { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; }
+  .sync-status { font-size: 12px; color: var(--text3); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -109,7 +175,7 @@
 <div class="header">
   <div class="header-inner">
     <h1>シフト・請求書管理</h1>
-    <span class="version-badge" id="ver-badge">v1.0.0</span>
+    <span class="version-badge" id="ver-badge">v2.0.0</span>
   </div>
   <nav>
     <div class="tabs">
@@ -136,7 +202,7 @@
       <div class="form-grid" style="margin-bottom:8px">
         <div class="form-group">
           <label>業務種別</label>
-          <select id="new-type" onchange="onTypeChange()">
+          <select id="new-type">
             <option value="normal">通常クラス</option>
             <option value="camp">キャンプクラス</option>
             <option value="training">研修業務</option>
@@ -150,9 +216,9 @@
         <div class="form-group"><label>開始</label><input type="time" id="new-start"></div>
         <div class="form-group"><label>終了</label><input type="time" id="new-end"></div>
       </div>
-      <div class="form-group" id="memo-group" style="display:none;margin-bottom:8px">
-        <label>メモ（任意）</label>
-        <input type="text" id="new-memo" placeholder="例: 研修資料作成 / 担当コース(ジュニア、スタンダード...、プラコ(生徒名)など)">
+      <div class="form-group" style="margin-bottom:8px">
+        <label>担当コース（任意）</label>
+        <input type="text" id="new-memo" placeholder="例: ジュニア / スタンダード / 研修資料作成">
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="addShift()">＋ 追加</button>
@@ -190,9 +256,13 @@
         </div>
         <div class="form-group"><label>対象年月</label><input type="month" id="bulk-month" onchange="buildWeekGrid()"></div>
       </div>
-      <div class="form-grid" style="margin-bottom:12px">
+      <div class="form-grid" style="margin-bottom:8px">
         <div class="form-group"><label>開始時刻</label><input type="time" id="bulk-start"></div>
         <div class="form-group"><label>終了時刻</label><input type="time" id="bulk-end"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>担当コース（任意）</label>
+        <input type="text" id="bulk-memo" placeholder="例: ジュニア / スタンダード">
       </div>
       <div id="week-grid"></div>
       <div class="btn-row">
@@ -243,11 +313,26 @@
     </div>
 
     <div class="card">
+      <div class="section-title">データ同期（Firebase）</div>
+      <div class="firebase-box">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、複数端末でデータが自動でリアルタイム同期されます。</p>
+        <div id="fb-signin-area">
+          <button class="btn btn-primary" onclick="firebaseSignIn()">🔗 Googleアカウントでログイン・同期</button>
+        </div>
+        <div id="fb-signout-area" style="display:none">
+          <div class="fb-connected">✓ 同期中: <strong id="fb-user-name"></strong></div>
+          <button class="btn btn-sm" onclick="firebaseSignOut()">ログアウト</button>
+        </div>
+        <p class="sync-status" id="sync-status"></p>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="section-title">Google カレンダー連携</div>
       <div class="gcal-box">
         <p style="font-size:13px;color:var(--text2);margin-bottom:12px">接続後はシフト追加・削除時にGoogleカレンダーへ自動反映され、授業の15分前に通知が届きます。</p>
         <div id="gcal-connect-area">
-          <button class="btn btn-primary" onclick="connectGcal()">🗓 Google アカウントで接続</button>
+          <button class="btn btn-primary" onclick="connectGcal()">🗓 Googleカレンダーと接続</button>
         </div>
         <div id="gcal-connected-area" style="display:none">
           <div class="gcal-connected">✓ Googleカレンダーと接続済み</div>
@@ -277,50 +362,65 @@
 </div>
 
 <script>
-const APP_VERSION = '1.0.0';
+const APP_VERSION   = '2.0.0';
 const GCAL_CLIENT_ID = '625510413951-grb4c5tre0fpml8so79pgb95es33plei.apps.googleusercontent.com';
 
-document.getElementById('ver-badge').textContent = 'v' + APP_VERSION;
+document.getElementById('ver-badge').textContent  = 'v' + APP_VERSION;
 document.getElementById('ver-display').textContent = APP_VERSION;
 
-const TYPE_LABEL = {normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG'};
-const TYPE_COLOR = {normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556'};
+const TYPE_LABEL   = {normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG'};
+const TYPE_GCAL    = {normal:'【通常】',camp:'【キャンプ】',training:'【研修】',dev:'【開発】',mtg:'【MTG】'};
+const TYPE_COLOR   = {normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556'};
 const TYPE_INVOICE = {normal:false,camp:true,training:true,dev:true,mtg:true};
-const TYPE_HOURLY = {normal:false,camp:false,training:true,dev:true,mtg:true};
-const DAYS_JA = ['日','月','火','水','木','金','土'];
-const WEEK_LABELS = ['第1週','第2週','第3週','第4週','第5週'];
+const TYPE_HOURLY  = {normal:false,camp:false,training:true,dev:true,mtg:true};
+const DAYS_JA      = ['日','月','火','水','木','金','土'];
+const WEEK_LABELS  = ['第1週','第2週','第3週','第4週','第5週'];
 
-let shifts = [];
-let rates = {normal:0,camp:0,training:0,dev:0,mtg:0,close:0};
+let shifts    = [];
+let rates     = {normal:0,camp:0,training:0,dev:0,mtg:0,close:0};
 let gcalToken = null;
 let viewMonth = new Date(); viewMonth.setDate(1);
 
-// ── ローカル日付文字列（タイムゾーンずれ防止）──
+// Firebase データ受信
+window._fbShifts = null;
+window._fbRates  = null;
+window.onFirebaseDataLoaded = function() {
+  if (window._fbShifts !== null) shifts = window._fbShifts;
+  if (window._fbRates  !== null) rates  = {...rates, ...window._fbRates};
+  saveLocal();
+  renderShifts(); renderMetrics(); checkConflicts();
+  ['normal','camp','training','dev','mtg','close'].forEach(k => {
+    const el = document.getElementById('rate-'+k); if (el) el.value = rates[k] || '';
+  });
+};
+
 function toLocalDateStr(dt) {
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth()+1).padStart(2,'0');
-  const d = String(dt.getDate()).padStart(2,'0');
-  return `${y}-${m}-${d}`;
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
 }
 
-// ── Storage ──
-function load() {
+function loadLocal() {
   try {
     const s = localStorage.getItem('shifts_v3'); if (s) shifts = JSON.parse(s);
-    const r = localStorage.getItem('rates_v2'); if (r) rates = {...rates, ...JSON.parse(r)};
-    const t = localStorage.getItem('gcal_token'); if (t) { gcalToken = t; updateGcalUI(true); }
+    const r = localStorage.getItem('rates_v2');  if (r) rates  = {...rates, ...JSON.parse(r)};
+    const t = localStorage.getItem('gcal_token');if (t) { gcalToken = t; updateGcalUI(true); }
   } catch(e) {}
 }
-function save() { try { localStorage.setItem('shifts_v3', JSON.stringify(shifts)); } catch(e) {} }
+function saveLocal() {
+  try { localStorage.setItem('shifts_v3', JSON.stringify(shifts)); } catch(e) {}
+}
+function save() {
+  saveLocal();
+  if (typeof window.saveToFirebase === 'function') window.saveToFirebase(shifts, rates);
+}
 function saveRates() {
   ['normal','camp','training','dev','mtg','close'].forEach(k => {
     const el = document.getElementById('rate-'+k); if (el) rates[k] = parseFloat(el.value)||0;
   });
   try { localStorage.setItem('rates_v2', JSON.stringify(rates)); } catch(e) {}
+  if (typeof window.saveToFirebase === 'function') window.saveToFirebase(shifts, rates);
   renderMetrics();
 }
 
-// ── Tabs ──
 function switchTab(t) {
   const ids = ['shifts','bulk','invoice','settings'];
   document.querySelectorAll('.tab').forEach((b,i) => b.classList.toggle('active', ids[i]===t));
@@ -330,59 +430,61 @@ function switchTab(t) {
   if (t==='bulk') buildWeekGrid();
 }
 
-function onTypeChange() {
-  document.getElementById('memo-group').style.display = 'flex';
-}
-
 function showFlash(id, txt, ok) {
   const el = document.getElementById(id);
   el.textContent = txt; el.className = 'flash ' + (ok?'ok':'err');
   setTimeout(() => { el.className='flash'; }, 3500);
 }
 
-// ── Add shift ──
 function addShift() {
-  const type = document.getElementById('new-type').value;
-  const date = document.getElementById('new-date').value;
+  const type  = document.getElementById('new-type').value;
+  const date  = document.getElementById('new-date').value;
   const start = document.getElementById('new-start').value;
-  const end = document.getElementById('new-end').value;
-  const memo = document.getElementById('new-memo').value;
+  const end   = document.getElementById('new-end').value;
+  const memo  = document.getElementById('new-memo').value;
   if (!date||!start||!end) { showFlash('add-msg','日付・時刻を入力してください',false); return; }
   if (start>=end) { showFlash('add-msg','終了時刻は開始より後にしてください',false); return; }
-  const shift = {id: Date.now()+Math.random(), type, date, start, end, memo, closed:false, gcalEventId:null};
+  const shift = {id:Date.now()+Math.random(), type, date, start, end, memo, closed:false, gcalEventId:null};
   shifts.push(shift);
   save(); checkConflicts(); renderShifts(); renderMetrics();
   showFlash('add-msg','追加しました',true);
   if (gcalToken) syncToGcal(shift);
 }
 
-// ── Close toggle ──
 function toggleClose(id) {
   const s = shifts.find(x => x.id===id); if (!s) return;
   s.closed = !s.closed;
   save(); renderShifts(); renderMetrics();
 }
 
-// ── Delete ──
 function deleteShift(id) {
   if (!confirm('このシフトを削除しますか？')) return;
   const s = shifts.find(x => x.id===id);
   if (s && s.gcalEventId) deleteFromGcal(s.gcalEventId);
-  shifts = shifts.filter(s => s.id!==id);
+  shifts = shifts.filter(x => x.id!==id);
   save(); checkConflicts(); renderShifts(); renderMetrics();
 }
 
-// ── Duration ──
 function durationH(s, e) {
   const [sh,sm] = s.split(':').map(Number);
   const [eh,em] = e.split(':').map(Number);
   return ((eh*60+em)-(sh*60+sm))/60;
 }
 
-// ── Render shifts ──
+function getConflictIds() {
+  const sorted = [...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
+  const ids = new Set();
+  for (let i=0;i<sorted.length-1;i++) {
+    const a=sorted[i], b=sorted[i+1];
+    if (a.date===b.date && a.end>b.start) { ids.add(a.id); ids.add(b.id); }
+  }
+  return ids;
+}
+
 function renderShifts() {
   const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
   document.getElementById('month-label').textContent = yr+'年'+(mo+1)+'月';
+  const conflictIds = getConflictIds();
   const list = shifts
     .filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; })
     .sort((a,b) => (a.date+a.start)<(b.date+b.start)?-1:1);
@@ -390,20 +492,22 @@ function renderShifts() {
   if (!list.length) { el.innerHTML='<p style="font-size:13px;color:var(--text2)">この月のシフトはありません</p>'; return; }
   el.innerHTML = list.map(s => {
     const h = durationH(s.start, s.end);
-    const isClass = s.type==='normal'||s.type==='camp';
+    const isClass    = s.type==='normal'||s.type==='camp';
+    const isConflict = conflictIds.has(s.id);
     let sub = TYPE_HOURLY[s.type]
       ? `${s.start}〜${s.end}（${h.toFixed(1)}h）${s.memo?'・'+s.memo:''}`
-      : `${s.start}〜${s.end}（1コマ）`;
+      : `${s.start}〜${s.end}（1コマ）${s.memo?'・'+s.memo:''}`;
     if (s.closed) sub += ` → クローズ（15分 ¥${Math.round((rates.close||0)*0.25).toLocaleString()}）`;
-    const closedBadge = s.closed ? '<span class="closed-badge">クローズ</span>' : '';
-    const gcalBadge = s.gcalEventId ? '<span class="gcal-badge">📅</span>' : '';
+    const closedBadge   = s.closed     ? '<span class="closed-badge">クローズ</span>' : '';
+    const gcalBadge     = s.gcalEventId? '<span class="gcal-badge">📅</span>' : '';
+    const conflictBadge = isConflict   ? '<span class="conflict-badge">⚠ 重複</span>' : '';
     const closeBtn = isClass
       ? `<button class="btn ${s.closed?'btn-reopen':'btn-warn'}" onclick="toggleClose(${s.id})">${s.closed?'解除':'クローズ'}</button>`
       : '';
-    return `<div class="shift-item">
+    return `<div class="shift-item${isConflict?' has-conflict':''}">
       <div class="shift-dot" style="background:${s.closed?'#888':TYPE_COLOR[s.type]}"></div>
       <div class="shift-body">
-        <div class="shift-title">${s.date.slice(5).replace('-','/')} ${TYPE_LABEL[s.type]} ${closedBadge}${gcalBadge}</div>
+        <div class="shift-title">${s.date.slice(5).replace('-','/')} ${TYPE_LABEL[s.type]} ${closedBadge}${gcalBadge}${conflictBadge}</div>
         <div class="shift-sub">${sub}</div>
       </div>
       <div class="shift-actions">
@@ -416,7 +520,6 @@ function renderShifts() {
 
 function changeMonth(d) { viewMonth.setMonth(viewMonth.getMonth()+d); renderShifts(); renderMetrics(); }
 
-// ── Metrics ──
 function renderMetrics() {
   const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
   const list = shifts.filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; });
@@ -431,20 +534,19 @@ function renderMetrics() {
   document.getElementById('m-pay').textContent = '¥'+Math.round(pay).toLocaleString();
 }
 
-// ── Conflict check ──
 function checkConflicts() {
   const sorted = [...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
   const conflicts = [];
   for (let i=0;i<sorted.length-1;i++) {
-    const a=sorted[i],b=sorted[i+1];
-    if (a.date===b.date&&a.end>b.start)
-      conflicts.push(`${a.date} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);
+    const a=sorted[i], b=sorted[i+1];
+    if (a.date===b.date && a.end>b.start)
+      conflicts.push(`${a.date.slice(5).replace('-','/')} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);
   }
-  document.getElementById('conflict-zone').innerHTML = conflicts
-    .map(c=>`<div class="alert alert-danger">⚠ ダブルブッキング: ${c}</div>`).join('');
+  document.getElementById('conflict-zone').innerHTML = conflicts.length
+    ? `<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`
+    : '';
 }
 
-// ── Bulk registration ──
 function getNthWeekday(yr, mo, week, day) {
   let d=new Date(yr,mo,1), count=0;
   while (d.getMonth()===mo) {
@@ -462,71 +564,73 @@ function buildWeekGrid() {
   grid.innerHTML = '';
   for (let w=0;w<5;w++) {
     const block = document.createElement('div'); block.className='week-block';
-    const hdr = document.createElement('div'); hdr.className='week-header';
+    const hdr   = document.createElement('div'); hdr.className='week-header';
     hdr.innerHTML = `<span>${WEEK_LABELS[w]}</span><span>▾</span>`;
-    const body = document.createElement('div'); body.className='week-body';
-    const row = document.createElement('div'); row.className='day-row';
+    const body  = document.createElement('div'); body.className='week-body';
+    const row   = document.createElement('div'); row.className='day-row';
     let anyExists = false;
-    for (let dayIdx=0;dayIdx<7;dayIdx++) {
-      const dt = getNthWeekday(yr,mo-1,w,dayIdx);
+    for (let dayIdx=0; dayIdx<7; dayIdx++) {
+      const dt  = getNthWeekday(yr, mo-1, w, dayIdx);
       const btn = document.createElement('button'); btn.className='day-btn';
       btn.textContent = DAYS_JA[dayIdx];
       if (!dt) { btn.disabled=true; }
       else {
         btn.title = `${mo}/${dt.getDate()}`;
-        btn.dataset.week=w; btn.dataset.day=dayIdx;
+        btn.dataset.week = w;
+        btn.dataset.day  = dayIdx;
         btn.onclick = function(){ this.classList.toggle('on'); };
-        anyExists=true;
+        anyExists = true;
       }
       row.appendChild(btn);
     }
     if (!anyExists) {
-      const note=document.createElement('p');
-      note.style.cssText='font-size:12px;color:var(--text3)';
-      note.textContent='この週は存在しません';
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:12px;color:var(--text3)';
+      note.textContent = 'この週は存在しません';
       row.appendChild(note);
     }
     body.appendChild(row);
-    hdr.onclick=()=>body.classList.toggle('open');
+    hdr.onclick = () => body.classList.toggle('open');
     block.appendChild(hdr); block.appendChild(body); grid.appendChild(block);
   }
 }
 
 function executeBulk() {
-  const mv=document.getElementById('bulk-month').value;
-  const type=document.getElementById('bulk-type').value;
-  const start=document.getElementById('bulk-start').value;
-  const end=document.getElementById('bulk-end').value;
+  const mv    = document.getElementById('bulk-month').value;
+  const type  = document.getElementById('bulk-type').value;
+  const start = document.getElementById('bulk-start').value;
+  const end   = document.getElementById('bulk-end').value;
+  const memo  = document.getElementById('bulk-memo').value;
   if (!mv||!start||!end) { showFlash('bulk-msg','年月・時刻を入力してください',false); return; }
   if (start>=end) { showFlash('bulk-msg','終了時刻は開始より後にしてください',false); return; }
-  const [yr,mo]=mv.split('-').map(Number);
-  const sel=document.querySelectorAll('#week-grid .day-btn.on');
+  const [yr,mo] = mv.split('-').map(Number);
+  const sel = document.querySelectorAll('#week-grid .day-btn.on');
   if (!sel.length) { showFlash('bulk-msg','曜日を選択してください',false); return; }
-  let count=0;
+  let count = 0;
   sel.forEach(btn => {
-    const dt=getNthWeekday(yr,mo-1,parseInt(btn.dataset.week),parseInt(btn.dataset.day));
+    const dt = getNthWeekday(yr, mo-1, parseInt(btn.dataset.week), parseInt(btn.dataset.day));
     if (dt) {
-      const shift = {id:Date.now()+Math.random(), type, date:toLocalDateStr(dt), start, end, memo:'', closed:false, gcalEventId:null};
+      const shift = {id:Date.now()+Math.random(), type, date:toLocalDateStr(dt), start, end, memo, closed:false, gcalEventId:null};
       shifts.push(shift);
       count++;
       if (gcalToken) syncToGcal(shift);
     }
   });
   save(); checkConflicts(); renderShifts(); renderMetrics();
-  showFlash('bulk-msg',count+'件を登録しました（存在しない週は自動スキップ）',true);
+  showFlash('bulk-msg', count+'件を登録しました（存在しない週は自動スキップ）', true);
   document.querySelectorAll('#week-grid .day-btn.on').forEach(b=>b.classList.remove('on'));
 }
 
-// ── Invoice ──
 function generateInvoice() {
-  const mv=document.getElementById('inv-month').value; if (!mv) return;
-  const [yr,mo]=mv.split('-').map(Number);
-  const inMonth=shifts.filter(s=>{ const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()+1===mo; })
+  const mv = document.getElementById('inv-month').value; if (!mv) return;
+  const [yr,mo] = mv.split('-').map(Number);
+  const inMonth = shifts
+    .filter(s=>{ const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()+1===mo; })
     .sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
   const campShifts   = inMonth.filter(s=>s.type==='camp'&&!s.closed);
   const outerShifts  = inMonth.filter(s=>TYPE_INVOICE[s.type]&&s.type!=='camp'&&!s.closed);
   const closedShifts = inMonth.filter(s=>(s.type==='normal'||s.type==='camp')&&s.closed);
-  let lines=[];
+  let lines = [];
   if (campShifts.length) {
     lines.push('講師業務キャンプ');
     campShifts.forEach(s=>{ const d=new Date(s.date); lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}`); });
@@ -535,27 +639,26 @@ function generateInvoice() {
   if (outerShifts.length||closedShifts.length) {
     lines.push('講師外業務');
     outerShifts.forEach(s=>{
-      const d=new Date(s.date);
-      const label=s.type==='training'?'研修業務':s.type==='dev'?'教材開発':'その他MTG';
+      const d = new Date(s.date);
+      const label = s.type==='training'?'研修業務':s.type==='dev'?'教材開発':'その他MTG';
       lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label})`);
     });
     closedShifts.forEach(s=>{
-      const d=new Date(s.date);
+      const d = new Date(s.date);
       lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (授業クローズ 15分)`);
     });
   }
   if (!lines.length) lines=['（この月の対象シフトはありません）'];
-  document.getElementById('invoice-out').textContent=lines.join('\n');
+  document.getElementById('invoice-out').textContent = lines.join('\n');
 }
 
 function copyInvoice() {
-  const txt=document.getElementById('invoice-out').textContent;
+  const txt = document.getElementById('invoice-out').textContent;
   navigator.clipboard.writeText(txt).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));
 }
 
-// ── Google Calendar（GIS方式）──
 function updateGcalUI(connected) {
-  document.getElementById('gcal-connect-area').style.display = connected ? 'none' : 'block';
+  document.getElementById('gcal-connect-area').style.display   = connected ? 'none'  : 'block';
   document.getElementById('gcal-connected-area').style.display = connected ? 'block' : 'none';
 }
 
@@ -583,6 +686,10 @@ function disconnectGcal() {
   updateGcalUI(false);
 }
 
+function gcalTitle(shift) {
+  return TYPE_GCAL[shift.type] + (shift.memo ? ' ' + shift.memo : '');
+}
+
 function syncToGcal(shift) {
   if (!gcalToken) return;
   const isClass = !TYPE_HOURLY[shift.type];
@@ -590,7 +697,7 @@ function syncToGcal(shift) {
     method: 'POST',
     headers: {'Authorization':'Bearer '+gcalToken, 'Content-Type':'application/json'},
     body: JSON.stringify({
-      summary: TYPE_LABEL[shift.type]+(shift.memo?' - '+shift.memo:''),
+      summary: gcalTitle(shift),
       start: {dateTime:`${shift.date}T${shift.start}:00`, timeZone:'Asia/Tokyo'},
       end:   {dateTime:`${shift.date}T${shift.end}:00`,   timeZone:'Asia/Tokyo'},
       reminders: {useDefault:false, overrides: isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
@@ -614,22 +721,21 @@ function deleteFromGcal(gcalEventId) {
   }).catch(()=>{});
 }
 
-// ── Export / Import ──
 function exportData() {
-  const blob=new Blob([JSON.stringify({version:APP_VERSION,shifts,rates},null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=`shifts_${new Date().toISOString().slice(0,10)}.json`; a.click();
+  const blob = new Blob([JSON.stringify({version:APP_VERSION,shifts,rates},null,2)],{type:'application/json'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a'); a.href=url; a.download=`shifts_${toLocalDateStr(new Date())}.json`; a.click();
   URL.revokeObjectURL(url);
 }
 function importData() { document.getElementById('import-file').click(); }
 function handleImport(e) {
-  const file=e.target.files[0]; if (!file) return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
     try {
-      const data=JSON.parse(ev.target.result);
-      if (data.shifts) { shifts=data.shifts; save(); }
-      if (data.rates) { rates={...rates,...data.rates}; try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){} }
+      const data = JSON.parse(ev.target.result);
+      if (data.shifts) { shifts=data.shifts; saveLocal(); }
+      if (data.rates)  { rates={...rates,...data.rates}; try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){} }
       renderShifts(); renderMetrics(); checkConflicts();
       ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
       alert('インポートしました');
@@ -643,19 +749,16 @@ function clearAll() {
   }
 }
 
-// ── Init ──
 function init() {
-  load();
-  document.getElementById('new-date').value=toLocalDateStr(new Date());
-  const now=new Date();
-  document.getElementById('bulk-month').value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  loadLocal();
+  document.getElementById('new-date').value = toLocalDateStr(new Date());
+  const now = new Date();
+  document.getElementById('bulk-month').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
   ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
-  onTypeChange();
   renderShifts(); renderMetrics(); checkConflicts(); buildWeekGrid();
 }
 init();
 
-// ── Service Worker ──
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
