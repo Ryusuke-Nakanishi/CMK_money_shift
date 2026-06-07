@@ -618,7 +618,8 @@ function connectGcal() {
   const clientId=gcalClientId||document.getElementById('gcal-client-id').value;
   if (!clientId) { alert('クライアントIDを入力してください'); return; }
   const scope='https://www.googleapis.com/auth/calendar.events';
-  const url=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(location.href.split('?')[0])}&scope=${encodeURIComponent(scope)}`;
+  const redirectUri='https://cmkmoneyshift.netlify.app';
+  const url=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
   window.open(url,'gcal_auth','width=500,height=600');
   document.getElementById('gcal-status').textContent='ポップアップでGoogleアカウントにログインしてください';
 }
