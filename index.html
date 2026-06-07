@@ -714,16 +714,38 @@ function generateInvoice() {
   }
   if (outerShifts.length||closedShifts.length) {
     lines.push('講師外業務');
-    outerShifts.forEach(s=>{
+    // 研修業務
+    outerShifts.filter(s=>s.type==='training').forEach(s=>{
       const d = new Date(s.date);
-      const label = s.type==='training'?'研修業務':s.type==='dev'?'教材開発':s.type==='sns'?'SNSマーケティング':'その他MTG';
       const memo = s.memo ? ' ' + s.memo : '';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label}${memo})`);
+      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (研修業務${memo})`);
     });
-    closedShifts.forEach(s=>{
+    // 教材開発
+    outerShifts.filter(s=>s.type==='dev').forEach(s=>{
       const d = new Date(s.date);
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (授業クローズ 15分)`);
+      const memo = s.memo ? ' ' + s.memo : '';
+      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (教材開発${memo})`);
     });
+    // SNSマーケティング
+    outerShifts.filter(s=>s.type==='sns').forEach(s=>{
+      const d = new Date(s.date);
+      const memo = s.memo ? ' ' + s.memo : '';
+      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (SNSマーケティング${memo})`);
+    });
+    // その他MTG（授業クローズ分を合算）
+    const mtgShifts = outerShifts.filter(s=>s.type==='mtg');
+    const closedH = closedShifts.length * 0.25;
+    if (mtgShifts.length || closedShifts.length) {
+      mtgShifts.forEach(s=>{
+        const d = new Date(s.date);
+        const memo = s.memo ? ' ' + s.memo : '';
+        lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (その他MTG${memo})`);
+      });
+      closedShifts.forEach(s=>{
+        const d = new Date(s.date);
+        lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (その他MTG 授業クローズ 15分)`);
+      });
+    }
   }
   if (!lines.length) lines=['（この月の対象シフトはありません）'];
   document.getElementById('invoice-out').textContent = lines.join('\n');
