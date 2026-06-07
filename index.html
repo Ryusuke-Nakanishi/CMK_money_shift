@@ -152,7 +152,7 @@
       </div>
       <div class="form-group" id="memo-group" style="display:none;margin-bottom:8px">
         <label>メモ（任意）</label>
-        <input type="text" id="new-memo" placeholder="例: 研修資料作成">
+        <input type="text" id="new-memo" placeholder="例: 研修資料作成 / 担当コース(ジュニア、スタンダード...、プラコ(生徒名)など)">
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="addShift()">＋ 追加</button>
@@ -331,8 +331,7 @@ function switchTab(t) {
 }
 
 function onTypeChange() {
-  const t = document.getElementById('new-type').value;
-  document.getElementById('memo-group').style.display = TYPE_HOURLY[t] ? 'flex' : 'none';
+  document.getElementById('memo-group').style.display = 'flex';
 }
 
 function showFlash(id, txt, ok) {
