@@ -10,10 +10,9 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>シフト・請求書管理</title>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
-  import { getAuth, signInWithRedirect, GoogleAuthProvider, signOut, onAuthStateChanged, getRedirectResult }
+  import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
   import { getFirestore, doc, setDoc, onSnapshot }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
@@ -24,8 +23,7 @@
     projectId: "shift-app-1fa59",
     storageBucket: "shift-app-1fa59.firebasestorage.app",
     messagingSenderId: "1014397065555",
-    appId: "1:1014397065555:web:d681d7b76c565313b569a6",
-    measurementId: "G-3CBJC8DS70"
+    appId: "1:1014397065555:web:d681d7b76c565313b569a6"
   };
 
   const app  = initializeApp(firebaseConfig);
@@ -33,19 +31,31 @@
   const db   = getFirestore(app);
   let unsubscribe = null;
 
-  // ログイン
-  window.firebaseSignIn = async function() {
+  // Googleログイン（カレンダー連携も同時に取得）
+  window.googleSignIn = async function() {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithRedirect(auth, provider);
-    } catch(e) { alert('ログインに失敗しました: ' + e.message); }
+      provider.addScope('https://www.googleapis.com/auth/calendar.events');
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential && credential.accessToken) {
+        window._gcalToken = credential.accessToken;
+        try { localStorage.setItem('gcal_token', credential.accessToken); } catch(e) {}
+        if (typeof window.onGcalConnected === 'function') window.onGcalConnected();
+      }
+    } catch(e) {
+      alert('ログインに失敗しました: ' + e.message);
+    }
   };
 
   // ログアウト
-  window.firebaseSignOut = async function() {
+  window.googleSignOut = async function() {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    window._gcalToken = null;
+    try { localStorage.removeItem('gcal_token'); } catch(e) {}
     await signOut(auth);
-    setFbStatus('disconnected', '');
+    updateAuthUI(null);
   };
 
   // データ保存
@@ -53,46 +63,52 @@
     const user = auth.currentUser; if (!user) return;
     try {
       await setDoc(doc(db, 'users', user.uid), { shifts, rates, updatedAt: Date.now() });
-      setFbStatus('synced', user.displayName || user.email);
+      setStatusBar('synced', user.displayName || user.email);
     } catch(e) { console.warn('Firebase save error', e); }
   };
 
-  // UI状態更新
-  function setFbStatus(state, name) {
-    const el = document.getElementById('fb-status-bar');
-    if (!el) return;
+  // ステータスバー更新
+  function setStatusBar(state, name) {
+    const bar = document.getElementById('status-bar');
+    if (!bar) return;
     if (state === 'synced') {
-      el.style.display = 'flex';
-      el.style.background = 'var(--success-bg)';
-      el.style.color = 'var(--success-text)';
-      el.innerHTML = `✓ 同期済み: <strong style="margin-left:4px">${name}</strong><span style="margin-left:auto;font-size:11px">${new Date().toLocaleTimeString('ja-JP')}</span>`;
+      bar.style.display = 'flex';
+      bar.style.background = 'var(--success-bg)';
+      bar.style.color = 'var(--success-text)';
+      bar.style.borderBottom = '0.5px solid var(--success-text)';
+      bar.innerHTML = `✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">${new Date().toLocaleTimeString('ja-JP')}</span>`;
     } else if (state === 'syncing') {
-      el.style.display = 'flex';
-      el.style.background = 'var(--warning-bg)';
-      el.style.color = 'var(--warning-text)';
-      el.innerHTML = `⟳ 同期中...`;
+      bar.style.display = 'flex';
+      bar.style.background = 'var(--warning-bg)';
+      bar.style.color = 'var(--warning-text)';
+      bar.style.borderBottom = '0.5px solid var(--close-color)';
+      bar.innerHTML = `⟳ 同期中...`;
     } else {
-      el.style.display = 'none';
-    }
-    // 設定タブのUI
-    const signinArea  = document.getElementById('fb-signin-area');
-    const signoutArea = document.getElementById('fb-signout-area');
-    const userName    = document.getElementById('fb-user-name');
-    if (!signinArea) return;
-    if (state === 'disconnected') {
-      signinArea.style.display  = 'block';
-      signoutArea.style.display = 'none';
-    } else {
-      signinArea.style.display  = 'none';
-      signoutArea.style.display = 'block';
-      if (userName) userName.textContent = name;
+      bar.style.display = 'none';
     }
   }
 
-  // リアルタイム同期開始
+  // 認証UI更新
+  function updateAuthUI(user) {
+    const signinArea  = document.getElementById('auth-signin-area');
+    const signoutArea = document.getElementById('auth-signout-area');
+    const userName    = document.getElementById('auth-user-name');
+    if (!signinArea) return;
+    if (user) {
+      signinArea.style.display  = 'none';
+      signoutArea.style.display = 'block';
+      if (userName) userName.textContent = user.displayName || user.email;
+    } else {
+      signinArea.style.display  = 'block';
+      signoutArea.style.display = 'none';
+      setStatusBar('disconnected', '');
+    }
+  }
+
+  // リアルタイム同期
   function startSync(user) {
-    if (unsubscribe) { unsubscribe(); }
-    setFbStatus('syncing', user.displayName || user.email);
+    if (unsubscribe) unsubscribe();
+    setStatusBar('syncing', user.displayName || user.email);
     unsubscribe = onSnapshot(doc(db, 'users', user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
@@ -100,28 +116,25 @@
         if (data.rates)  window._fbRates  = data.rates;
         if (typeof window.onFirebaseDataLoaded === 'function') window.onFirebaseDataLoaded();
       }
-      setFbStatus('synced', user.displayName || user.email);
-    }, err => {
-      console.warn('snapshot error', err);
-    });
+      setStatusBar('synced', user.displayName || user.email);
+    }, err => console.warn('snapshot error', err));
   }
 
-  // 認証状態の監視
+  // 認証状態監視
   onAuthStateChanged(auth, user => {
+    updateAuthUI(user);
     if (user) {
+      // カレンダートークンをlocalStorageから復元
+      const t = localStorage.getItem('gcal_token');
+      if (t) {
+        window._gcalToken = t;
+        if (typeof window.onGcalConnected === 'function') window.onGcalConnected();
+      }
       startSync(user);
     } else {
-      setFbStatus('disconnected', '');
       if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     }
   });
-
-  // リダイレクト後の結果処理
-  getRedirectResult(auth).then(result => {
-    if (result && result.user) {
-      startSync(result.user);
-    }
-  }).catch(e => console.warn('redirect result error:', e));
 </script>
 <style>
   :root {
@@ -150,8 +163,8 @@
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
   #update-banner { position: fixed; top: 0; left: 0; right: 0; background: var(--accent); color: var(--accent-text); font-size: 13px; padding: 10px 16px; z-index: 9999; display: none; align-items: center; justify-content: space-between; gap: 8px; }
   #update-banner button { background: var(--accent-text); color: var(--accent); border: none; border-radius: 4px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
-  #fb-status-bar { display: none; max-width: 720px; margin: 0 auto; padding: 6px 16px; font-size: 12px; align-items: center; gap: 6px; border-bottom: 0.5px solid var(--border); }
   .header { position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 0.5px solid var(--border); }
+  #status-bar { display: none; max-width: 100%; padding: 6px 16px; font-size: 12px; align-items: center; gap: 6px; }
   .header-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
   .header h1 { font-size: 17px; font-weight: 600; }
   .version-badge { font-size: 11px; color: var(--text3); background: var(--bg3); padding: 2px 8px; border-radius: 20px; }
@@ -207,11 +220,11 @@
   .day-btn:disabled { opacity: .3; cursor: default; }
   .rate-note { font-size: 12px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
   .divider { height: 0.5px; background: var(--border); margin: 12px 0; }
-  .gcal-box, .firebase-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
+  .auth-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
   .flash { font-size: 13px; margin-top: 8px; display: none; padding: 6px 10px; border-radius: var(--radius-sm); }
   .flash.ok  { background: var(--success-bg); color: var(--success-text); display: block; }
   .flash.err { background: var(--danger-bg);  color: var(--danger-text);  display: block; }
-  .gcal-connected, .fb-connected { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; }
+  .connected-box { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -222,7 +235,7 @@
 </div>
 
 <div class="header">
-  <div id="fb-status-bar"></div>
+  <div id="status-bar"></div>
   <div class="header-inner">
     <h1>シフト・請求書管理</h1>
     <span class="version-badge" id="ver-badge">v2.0.0</span>
@@ -363,29 +376,16 @@
     </div>
 
     <div class="card">
-      <div class="section-title">データ同期（Firebase）</div>
-      <div class="firebase-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、複数端末でデータが自動でリアルタイム同期されます。ログイン状態はヘッダー下のバーで確認できます。</p>
-        <div id="fb-signin-area">
-          <button class="btn btn-primary" onclick="firebaseSignIn()">🔗 Googleアカウントでログイン・同期</button>
+      <div class="section-title">Googleアカウント連携</div>
+      <div class="auth-box">
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、Googleカレンダーへの自動登録・複数端末でのデータ同期が有効になります。</p>
+        <div id="auth-signin-area">
+          <button class="btn btn-primary" onclick="googleSignIn()">🔗 Googleアカウントでログイン</button>
         </div>
-        <div id="fb-signout-area" style="display:none">
-          <div class="fb-connected">✓ 同期中: <strong id="fb-user-name"></strong></div>
-          <button class="btn btn-sm" onclick="firebaseSignOut()">ログアウト</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="section-title">Google カレンダー連携</div>
-      <div class="gcal-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">接続後はシフト追加・削除時にGoogleカレンダーへ自動反映され、授業の15分前に通知が届きます。</p>
-        <div id="gcal-connect-area">
-          <button class="btn btn-primary" onclick="connectGcal()">🗓 Googleカレンダーと接続</button>
-        </div>
-        <div id="gcal-connected-area" style="display:none">
-          <div class="gcal-connected">✓ Googleカレンダーと接続済み</div>
-          <button class="btn btn-sm" style="margin-top:8px" onclick="disconnectGcal()">接続解除</button>
+        <div id="auth-signout-area" style="display:none">
+          <div class="connected-box">✓ ログイン中: <strong id="auth-user-name" style="margin-left:4px"></strong></div>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:8px">カレンダー連携・データ同期が有効です</p>
+          <button class="btn btn-sm" onclick="googleSignOut()">ログアウト</button>
         </div>
       </div>
     </div>
@@ -411,9 +411,7 @@
 </div>
 
 <script>
-const APP_VERSION    = '2.0.0';
-const GCAL_CLIENT_ID = '625510413951-grb4c5tre0fpml8so79pgb95es33plei.apps.googleusercontent.com';
-
+const APP_VERSION = '2.0.0';
 document.getElementById('ver-badge').textContent  = 'v' + APP_VERSION;
 document.getElementById('ver-display').textContent = APP_VERSION;
 
@@ -427,8 +425,13 @@ const WEEK_LABELS  = ['第1週','第2週','第3週','第4週','第5週'];
 
 let shifts    = [];
 let rates     = {normal:0,camp:0,training:0,dev:0,mtg:0,close:0};
-let gcalToken = null;
 let viewMonth = new Date(); viewMonth.setDate(1);
+
+// Googleカレンダートークン
+window._gcalToken = null;
+window.onGcalConnected = function() {
+  // トークン取得済み、特に追加UI不要（設定タブで表示）
+};
 
 // Firebase データ受信
 window._fbShifts = null;
@@ -451,7 +454,7 @@ function loadLocal() {
   try {
     const s = localStorage.getItem('shifts_v3'); if (s) shifts = JSON.parse(s);
     const r = localStorage.getItem('rates_v2');  if (r) rates  = {...rates, ...JSON.parse(r)};
-    const t = localStorage.getItem('gcal_token');if (t) { gcalToken = t; updateGcalUI(true); }
+    const t = localStorage.getItem('gcal_token');if (t) window._gcalToken = t;
   } catch(e) {}
 }
 function saveLocal() {
@@ -497,7 +500,7 @@ function addShift() {
   shifts.push(shift);
   save(); checkConflicts(); renderShifts(); renderMetrics();
   showFlash('add-msg','追加しました',true);
-  if (gcalToken) syncToGcal(shift);
+  if (window._gcalToken) syncToGcal(shift);
 }
 
 function toggleClose(id) {
@@ -661,7 +664,7 @@ function executeBulk() {
       const shift = {id:Date.now()+Math.random(), type, date:toLocalDateStr(dt), start, end, memo, closed:false, gcalEventId:null};
       shifts.push(shift);
       count++;
-      if (gcalToken) syncToGcal(shift);
+      if (window._gcalToken) syncToGcal(shift);
     }
   });
   save(); checkConflicts(); renderShifts(); renderMetrics();
@@ -705,47 +708,15 @@ function copyInvoice() {
   navigator.clipboard.writeText(txt).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));
 }
 
-function updateGcalUI(connected) {
-  document.getElementById('gcal-connect-area').style.display   = connected ? 'none'  : 'block';
-  document.getElementById('gcal-connected-area').style.display = connected ? 'block' : 'none';
-}
-
-function connectGcal() {
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: GCAL_CLIENT_ID,
-    scope: 'https://www.googleapis.com/auth/calendar.events',
-    callback: (response) => {
-      if (response && response.access_token) {
-        gcalToken = response.access_token;
-        try { localStorage.setItem('gcal_token', gcalToken); } catch(e) {}
-        updateGcalUI(true);
-        alert('Googleカレンダーと接続しました！');
-      } else {
-        alert('接続に失敗しました。もう一度お試しください。');
-      }
-    },
-  });
-  client.requestAccessToken();
-}
-
-function disconnectGcal() {
-  gcalToken = null;
-  try { localStorage.removeItem('gcal_token'); } catch(e) {}
-  updateGcalUI(false);
-}
-
-function gcalTitle(shift) {
-  return TYPE_GCAL[shift.type] + (shift.memo ? ' ' + shift.memo : '');
-}
-
 function syncToGcal(shift) {
-  if (!gcalToken) return;
+  if (!window._gcalToken) return;
   const isClass = !TYPE_HOURLY[shift.type];
+  const title   = TYPE_GCAL[shift.type] + (shift.memo ? ' ' + shift.memo : '');
   fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
     method: 'POST',
-    headers: {'Authorization':'Bearer '+gcalToken, 'Content-Type':'application/json'},
+    headers: {'Authorization':'Bearer '+window._gcalToken, 'Content-Type':'application/json'},
     body: JSON.stringify({
-      summary: gcalTitle(shift),
+      summary: title,
       start: {dateTime:`${shift.date}T${shift.start}:00`, timeZone:'Asia/Tokyo'},
       end:   {dateTime:`${shift.date}T${shift.end}:00`,   timeZone:'Asia/Tokyo'},
       reminders: {useDefault:false, overrides: isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
@@ -762,10 +733,10 @@ function syncToGcal(shift) {
 }
 
 function deleteFromGcal(gcalEventId) {
-  if (!gcalToken || !gcalEventId) return;
+  if (!window._gcalToken || !gcalEventId) return;
   fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`, {
     method: 'DELETE',
-    headers: {'Authorization':'Bearer '+gcalToken}
+    headers: {'Authorization':'Bearer '+window._gcalToken}
   }).catch(()=>{});
 }
 
