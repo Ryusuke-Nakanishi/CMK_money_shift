@@ -717,7 +717,8 @@ function generateInvoice() {
     outerShifts.forEach(s=>{
       const d = new Date(s.date);
       const label = s.type==='training'?'研修業務':s.type==='dev'?'教材開発':s.type==='sns'?'SNSマーケティング':'その他MTG';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label})`);
+      const memo = s.memo ? ' ' + s.memo : '';
+      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label}${memo})`);
     });
     closedShifts.forEach(s=>{
       const d = new Date(s.date);
