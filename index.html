@@ -618,7 +618,7 @@ function copyInvoice() {
 
 // ── Google Calendar ──
 function connectGcal() {
-  const clientId=document.getElementById('gcal-client-id').value||gcalClientId;
+  const clientId=gcalClientId||document.getElementById('gcal-client-id').value;
   if (!clientId) { alert('クライアントIDを入力してください'); return; }
   const scope='https://www.googleapis.com/auth/calendar.events';
   const url=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(location.href.split('?')[0])}&scope=${encodeURIComponent(scope)}`;
