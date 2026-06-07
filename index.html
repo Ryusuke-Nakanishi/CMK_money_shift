@@ -10,100 +10,56 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>シフト・請求書管理</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root {
-    --bg: #ffffff;
-    --bg2: #f5f5f5;
-    --bg3: #eeeeee;
-    --text: #111111;
-    --text2: #666666;
-    --text3: #999999;
-    --border: rgba(0,0,0,0.12);
-    --border2: rgba(0,0,0,0.22);
-    --accent: #111111;
-    --accent-text: #ffffff;
-    --success-bg: #edfaef;
-    --success-text: #1a7a32;
-    --danger-bg: #fdecea;
-    --danger-text: #c0392b;
-    --warning-bg: #fff8e1;
-    --warning-text: #b45309;
-    --close-color: #d97706;
-    --radius: 10px;
-    --radius-sm: 6px;
+    --bg: #ffffff; --bg2: #f5f5f5; --bg3: #eeeeee;
+    --text: #111111; --text2: #666666; --text3: #999999;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --accent: #111111; --accent-text: #ffffff;
+    --success-bg: #edfaef; --success-text: #1a7a32;
+    --danger-bg: #fdecea; --danger-text: #c0392b;
+    --warning-bg: #fff8e1; --warning-text: #b45309;
+    --close-color: #d97706; --radius: 10px; --radius-sm: 6px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111111;
-      --bg2: #1e1e1e;
-      --bg3: #2a2a2a;
-      --text: #f0f0f0;
-      --text2: #aaaaaa;
-      --text3: #666666;
-      --border: rgba(255,255,255,0.1);
-      --border2: rgba(255,255,255,0.2);
-      --accent: #f0f0f0;
-      --accent-text: #111111;
-      --success-bg: #0d2e14;
-      --success-text: #4ade80;
-      --danger-bg: #2e0d0d;
-      --danger-text: #f87171;
-      --warning-bg: #2e1f00;
-      --warning-text: #fbbf24;
+      --bg: #111111; --bg2: #1e1e1e; --bg3: #2a2a2a;
+      --text: #f0f0f0; --text2: #aaaaaa; --text3: #666666;
+      --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.2);
+      --accent: #f0f0f0; --accent-text: #111111;
+      --success-bg: #0d2e14; --success-text: #4ade80;
+      --danger-bg: #2e0d0d; --danger-text: #f87171;
+      --warning-bg: #2e1f00; --warning-text: #fbbf24;
       --close-color: #fbbf24;
     }
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-
-  /* Update banner */
-  #update-banner { display: none; position: fixed; top: 0; left: 0; right: 0; background: var(--accent); color: var(--accent-text); font-size: 13px; padding: 10px 16px; z-index: 9999; display: none; align-items: center; justify-content: space-between; gap: 8px; }
+  #update-banner { position: fixed; top: 0; left: 0; right: 0; background: var(--accent); color: var(--accent-text); font-size: 13px; padding: 10px 16px; z-index: 9999; display: none; align-items: center; justify-content: space-between; gap: 8px; }
   #update-banner button { background: var(--accent-text); color: var(--accent); border: none; border-radius: 4px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
-
-  /* Header */
-  .header { position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 0.5px solid var(--border); padding: 0; }
+  .header { position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 0.5px solid var(--border); }
   .header-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
   .header h1 { font-size: 17px; font-weight: 600; }
   .version-badge { font-size: 11px; color: var(--text3); background: var(--bg3); padding: 2px 8px; border-radius: 20px; }
-
-  /* Tabs */
   .tabs { max-width: 720px; margin: 0 auto; display: flex; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { flex: 1; min-width: 70px; padding: 10px 4px; font-size: 13px; text-align: center; cursor: pointer; border: none; background: none; color: var(--text2); border-bottom: 2px solid transparent; transition: all .15s; white-space: nowrap; }
   .tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
-
-  /* Layout */
   .content { max-width: 720px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
   .panel { display: none; }
   .panel.active { display: flex; flex-direction: column; gap: 14px; }
-
-  /* Cards */
   .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
   .section-title { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
-
-  /* Metrics */
   .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .metric-card { background: var(--bg2); border-radius: var(--radius-sm); padding: 12px; }
   .metric-card .label { font-size: 11px; color: var(--text2); margin-bottom: 4px; line-height: 1.3; }
   .metric-card .value { font-size: 18px; font-weight: 600; }
-
-  /* Forms */
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .form-group { display: flex; flex-direction: column; gap: 4px; }
   .form-group label { font-size: 12px; color: var(--text2); }
-  .form-group input, .form-group select {
-    font-size: 15px; padding: 9px 11px;
-    border: 0.5px solid var(--border2);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text);
-    width: 100%;
-    appearance: auto;
-  }
+  .form-group input, .form-group select { font-size: 15px; padding: 9px 11px; border: 0.5px solid var(--border2); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); width: 100%; appearance: auto; }
   .form-group input:focus, .form-group select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-  /* Buttons */
   .btn { padding: 9px 16px; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: var(--bg); color: var(--text); font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: opacity .15s; font-family: inherit; }
   .btn:active { opacity: .7; }
   .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 500; }
@@ -112,14 +68,8 @@
   .btn-warn { color: var(--warning-text); border-color: var(--close-color); font-size: 12px; padding: 5px 10px; }
   .btn-reopen { color: var(--success-text); border-color: var(--success-text); font-size: 12px; padding: 5px 10px; }
   .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-
-  /* Alerts */
   .alert { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; }
   .alert-danger { background: var(--danger-bg); color: var(--danger-text); border: 0.5px solid var(--danger-text); }
-  .alert-success { background: var(--success-bg); color: var(--success-text); }
-  .alert-warning { background: var(--warning-bg); color: var(--warning-text); }
-
-  /* Shift list */
   .month-nav { display: flex; align-items: center; gap: 8px; }
   .month-nav span { font-size: 15px; font-weight: 500; min-width: 80px; text-align: center; }
   .shift-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
@@ -130,11 +80,7 @@
   .shift-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
   .shift-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
   .closed-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--warning-bg); color: var(--warning-text); font-weight: 500; white-space: nowrap; }
-
-  /* Invoice output */
   .invoice-out { font-family: 'Courier New', monospace; font-size: 14px; line-height: 2; white-space: pre-wrap; background: var(--bg2); border-radius: var(--radius-sm); padding: 14px; color: var(--text); min-height: 160px; }
-
-  /* Bulk grid */
   .week-block { border: 0.5px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
   .week-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--bg2); cursor: pointer; font-size: 14px; font-weight: 500; }
   .week-body { padding: 10px 12px; display: none; }
@@ -143,27 +89,18 @@
   .day-btn { width: 36px; height: 36px; border-radius: 50%; border: 0.5px solid var(--border2); background: var(--bg); color: var(--text2); font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .1s; }
   .day-btn.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .day-btn:disabled { opacity: .3; cursor: default; }
-
-  /* Settings */
   .rate-note { font-size: 12px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
   .divider { height: 0.5px; background: var(--border); margin: 12px 0; }
   .gcal-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
-
-  /* Flash msg */
   .flash { font-size: 13px; margin-top: 8px; display: none; padding: 6px 10px; border-radius: var(--radius-sm); }
   .flash.ok { background: var(--success-bg); color: var(--success-text); display: block; }
   .flash.err { background: var(--danger-bg); color: var(--danger-text); display: block; }
-
-  @media (max-width: 480px) {
-    .metrics { grid-template-columns: repeat(3,1fr); }
-    .metric-card .value { font-size: 15px; }
-    .form-grid { grid-template-columns: 1fr 1fr; }
-  }
+  .gcal-connected { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); }
 </style>
 </head>
 <body>
 
-<div id="update-banner" style="display:none">
+<div id="update-banner">
   <span>🔄 新しいバージョンが利用可能です</span>
   <button onclick="location.reload()">更新する</button>
 </div>
@@ -193,7 +130,6 @@
       <div class="metric-card"><div class="label">講師外 時間</div><div class="value" id="m-hours">0h</div></div>
       <div class="metric-card"><div class="label">概算報酬</div><div class="value" id="m-pay">¥0</div></div>
     </div>
-
     <div class="card">
       <div class="section-title">シフトを追加</div>
       <div class="form-grid" style="margin-bottom:8px">
@@ -207,10 +143,7 @@
             <option value="mtg">その他MTG</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>日付</label>
-          <input type="date" id="new-date">
-        </div>
+        <div class="form-group"><label>日付</label><input type="date" id="new-date"></div>
       </div>
       <div class="form-grid" style="margin-bottom:8px">
         <div class="form-group"><label>開始</label><input type="time" id="new-start"></div>
@@ -225,7 +158,6 @@
       </div>
       <div class="flash" id="add-msg"></div>
     </div>
-
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div class="section-title" style="margin-bottom:0">登録済みシフト</div>
@@ -255,10 +187,7 @@
             <option value="mtg">その他MTG</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>対象年月</label>
-          <input type="month" id="bulk-month" onchange="buildWeekGrid()">
-        </div>
+        <div class="form-group"><label>対象年月</label><input type="month" id="bulk-month" onchange="buildWeekGrid()"></div>
       </div>
       <div class="form-grid" style="margin-bottom:12px">
         <div class="form-group"><label>開始時刻</label><input type="time" id="bulk-start"></div>
@@ -309,16 +238,20 @@
         <div class="form-group"><label>その他MTG（時給）</label><input type="number" id="rate-mtg" onchange="saveRates()"></div>
         <div class="form-group"><label>授業クローズ（時給・15分固定）</label><input type="number" id="rate-close" onchange="saveRates()"></div>
       </div>
-      <p class="rate-note">授業クローズは実際の時間に関わらず15分（×0.25）で請求額を計算し、講師外業務として請求書に載ります。</p>
+      <p class="rate-note">授業クローズは15分（×0.25）で請求額を計算し、講師外業務として請求書に載ります。</p>
     </div>
 
     <div class="card">
       <div class="section-title">Google カレンダー連携</div>
       <div class="gcal-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Googleアカウントを接続してください。接続後はGoogleカレンダーと同期され、カレンダー登録＆授業の15分前に通知が届きます。</p>
-        
-        <button class="btn btn-primary" onclick="connectGcal()">Google アカウントで接続</button>
-        <div id="gcal-status" style="font-size:13px;color:var(--text2);margin-top:8px"></div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">接続後はシフト追加時にGoogleカレンダーへ自動登録され、授業の15分前に通知が届きます。</p>
+        <div id="gcal-connect-area">
+          <button class="btn btn-primary" onclick="connectGcal()">🗓 Google アカウントで接続</button>
+        </div>
+        <div id="gcal-connected-area" style="display:none">
+          <div class="gcal-connected">✓ Googleカレンダーと接続済み</div>
+          <button class="btn btn-sm" style="margin-top:8px" onclick="disconnectGcal()">接続解除</button>
+        </div>
       </div>
     </div>
 
@@ -336,14 +269,16 @@
     <div class="card">
       <div class="section-title">バージョン情報</div>
       <p style="font-size:13px;color:var(--text2)">現在のバージョン: <strong id="ver-display"></strong></p>
-      <p class="rate-note">アプリの更新は自動で行われます。新バージョンが利用可能になると画面上部にお知らせが表示されます。</p>
+      <p class="rate-note">新バージョンが利用可能になると画面上部にお知らせが表示されます。</p>
     </div>
   </div>
 
-</div><!-- /content -->
+</div>
 
 <script>
 const APP_VERSION = '1.0.0';
+const GCAL_CLIENT_ID = '625510413951-grb4c5tre0fpml8so79pgb95es33plei.apps.googleusercontent.com';
+
 document.getElementById('ver-badge').textContent = 'v' + APP_VERSION;
 document.getElementById('ver-display').textContent = APP_VERSION;
 
@@ -356,16 +291,14 @@ const WEEK_LABELS = ['第1週','第2週','第3週','第4週','第5週'];
 
 let shifts = [];
 let rates = {normal:0,camp:0,training:0,dev:0,mtg:0,close:0};
-let gcalClientId = '625510413951-grb4c5tre0fpml8so79pgb95es33plei.apps.googleusercontent.com';
 let gcalToken = null;
 let viewMonth = new Date(); viewMonth.setDate(1);
 
-// ── Storage ──
 function load() {
   try {
     const s = localStorage.getItem('shifts_v3'); if (s) shifts = JSON.parse(s);
     const r = localStorage.getItem('rates_v2'); if (r) rates = {...rates, ...JSON.parse(r)};
-    const g = localStorage.getItem('gcal_client'); if (g) gcalClientId = g;
+    const t = localStorage.getItem('gcal_token'); if (t) { gcalToken = t; updateGcalUI(true); }
   } catch(e) {}
 }
 function save() { try { localStorage.setItem('shifts_v3', JSON.stringify(shifts)); } catch(e) {} }
@@ -376,9 +309,7 @@ function saveRates() {
   try { localStorage.setItem('rates_v2', JSON.stringify(rates)); } catch(e) {}
   renderMetrics();
 }
-function saveGcal() { gcalClientId = document.getElementById('gcal-client-id').value; try { localStorage.setItem('gcal_client', gcalClientId); } catch(e) {} }
 
-// ── Tabs ──
 function switchTab(t) {
   const ids = ['shifts','bulk','invoice','settings'];
   document.querySelectorAll('.tab').forEach((b,i) => b.classList.toggle('active', ids[i]===t));
@@ -388,7 +319,6 @@ function switchTab(t) {
   if (t==='bulk') buildWeekGrid();
 }
 
-// ── Form helpers ──
 function onTypeChange() {
   const t = document.getElementById('new-type').value;
   document.getElementById('memo-group').style.display = TYPE_HOURLY[t] ? 'flex' : 'none';
@@ -400,7 +330,6 @@ function showFlash(id, txt, ok) {
   setTimeout(() => { el.className='flash'; }, 3500);
 }
 
-// ── Add shift ──
 function addShift() {
   const type = document.getElementById('new-type').value;
   const date = document.getElementById('new-date').value;
@@ -409,34 +338,31 @@ function addShift() {
   const memo = document.getElementById('new-memo').value;
   if (!date||!start||!end) { showFlash('add-msg','日付・時刻を入力してください',false); return; }
   if (start>=end) { showFlash('add-msg','終了時刻は開始より後にしてください',false); return; }
-  shifts.push({id: Date.now()+Math.random(), type, date, start, end, memo, closed:false});
+  const shift = {id: Date.now()+Math.random(), type, date, start, end, memo, closed:false};
+  shifts.push(shift);
   save(); checkConflicts(); renderShifts(); renderMetrics();
   showFlash('add-msg','追加しました',true);
-  if (gcalToken) syncToGcal({type,date,start,end,memo});
+  if (gcalToken) syncToGcal(shift);
 }
 
-// ── Close toggle ──
 function toggleClose(id) {
   const s = shifts.find(x => x.id===id); if (!s) return;
   s.closed = !s.closed;
   save(); renderShifts(); renderMetrics();
 }
 
-// ── Delete ──
 function deleteShift(id) {
   if (!confirm('このシフトを削除しますか？')) return;
   shifts = shifts.filter(s => s.id!==id);
   save(); checkConflicts(); renderShifts(); renderMetrics();
 }
 
-// ── Duration ──
 function durationH(s, e) {
   const [sh,sm] = s.split(':').map(Number);
   const [eh,em] = e.split(':').map(Number);
   return ((eh*60+em)-(sh*60+sm))/60;
 }
 
-// ── Render shifts ──
 function renderShifts() {
   const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
   document.getElementById('month-label').textContent = yr+'年'+(mo+1)+'月';
@@ -472,26 +398,20 @@ function renderShifts() {
 
 function changeMonth(d) { viewMonth.setMonth(viewMonth.getMonth()+d); renderShifts(); renderMetrics(); }
 
-// ── Metrics ──
 function renderMetrics() {
   const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
   const list = shifts.filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; });
   let koma=0, hours=0, pay=0;
   list.forEach(s => {
-    if (s.closed) {
-      hours += 0.25; pay += (rates.close||0)*0.25;
-    } else if (TYPE_HOURLY[s.type]) {
-      const h = durationH(s.start,s.end); hours+=h; pay+=h*(rates[s.type]||0);
-    } else {
-      koma++; pay += (rates[s.type]||0);
-    }
+    if (s.closed) { hours += 0.25; pay += (rates.close||0)*0.25; }
+    else if (TYPE_HOURLY[s.type]) { const h=durationH(s.start,s.end); hours+=h; pay+=h*(rates[s.type]||0); }
+    else { koma++; pay += (rates[s.type]||0); }
   });
   document.getElementById('m-koma').textContent = koma+'コマ';
   document.getElementById('m-hours').textContent = hours.toFixed(2)+'h';
   document.getElementById('m-pay').textContent = '¥'+Math.round(pay).toLocaleString();
 }
 
-// ── Conflict check ──
 function checkConflicts() {
   const sorted = [...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
   const conflicts = [];
@@ -501,11 +421,9 @@ function checkConflicts() {
       conflicts.push(`${a.date} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);
   }
   document.getElementById('conflict-zone').innerHTML = conflicts
-    .map(c=>`<div class="alert alert-danger">⚠ ダブルブッキング: ${c}</div>`)
-    .join('');
+    .map(c=>`<div class="alert alert-danger">⚠ ダブルブッキング: ${c}</div>`).join('');
 }
 
-// ── Bulk registration ──
 function getNthWeekday(yr, mo, week, day) {
   let d=new Date(yr,mo,1), count=0;
   while (d.getMonth()===mo) {
@@ -533,24 +451,13 @@ function buildWeekGrid() {
       const btn = document.createElement('button'); btn.className='day-btn';
       btn.textContent = DAYS_JA[d];
       if (!dt) { btn.disabled=true; }
-      else {
-        btn.title = `${mo}/${dt.getDate()}`;
-        btn.dataset.week=w; btn.dataset.day=d;
-        btn.onclick = function(){ this.classList.toggle('on'); };
-        anyExists=true;
-      }
+      else { btn.title=`${mo}/${dt.getDate()}`; btn.dataset.week=w; btn.dataset.day=d; btn.onclick=function(){ this.classList.toggle('on'); }; anyExists=true; }
       row.appendChild(btn);
     }
-    if (!anyExists) {
-      const note=document.createElement('p');
-      note.style.cssText='font-size:12px;color:var(--text3)';
-      note.textContent='この週は存在しません';
-      row.appendChild(note);
-    }
+    if (!anyExists) { const note=document.createElement('p'); note.style.cssText='font-size:12px;color:var(--text3)'; note.textContent='この週は存在しません'; row.appendChild(note); }
     body.appendChild(row);
     hdr.onclick=()=>body.classList.toggle('open');
-    block.appendChild(hdr); block.appendChild(body);
-    grid.appendChild(block);
+    block.appendChild(hdr); block.appendChild(body); grid.appendChild(block);
   }
 }
 
@@ -574,18 +481,14 @@ function executeBulk() {
   document.querySelectorAll('#week-grid .day-btn.on').forEach(b=>b.classList.remove('on'));
 }
 
-// ── Invoice ──
 function generateInvoice() {
-  const mv=document.getElementById('inv-month').value;
-  if (!mv) return;
+  const mv=document.getElementById('inv-month').value; if (!mv) return;
   const [yr,mo]=mv.split('-').map(Number);
   const inMonth=shifts.filter(s=>{ const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()+1===mo; })
     .sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
-
   const campShifts  = inMonth.filter(s=>s.type==='camp'&&!s.closed);
   const outerShifts = inMonth.filter(s=>TYPE_INVOICE[s.type]&&s.type!=='camp'&&!s.closed);
   const closedShifts= inMonth.filter(s=>(s.type==='normal'||s.type==='camp')&&s.closed);
-
   let lines=[];
   if (campShifts.length) {
     lines.push('講師業務キャンプ');
@@ -594,15 +497,8 @@ function generateInvoice() {
   }
   if (outerShifts.length||closedShifts.length) {
     lines.push('講師外業務');
-    outerShifts.forEach(s=>{
-      const d=new Date(s.date);
-      const label=s.type==='training'?'研修業務':s.type==='dev'?'教材開発':'その他MTG';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label})`);
-    });
-    closedShifts.forEach(s=>{
-      const d=new Date(s.date);
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (授業クローズ 15分)`);
-    });
+    outerShifts.forEach(s=>{ const d=new Date(s.date); const label=s.type==='training'?'研修業務':s.type==='dev'?'教材開発':'その他MTG'; lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label})`); });
+    closedShifts.forEach(s=>{ const d=new Date(s.date); lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (授業クローズ 15分)`); });
   }
   if (!lines.length) lines=['（この月の対象シフトはありません）'];
   document.getElementById('invoice-out').textContent=lines.join('\n');
@@ -613,32 +509,50 @@ function copyInvoice() {
   navigator.clipboard.writeText(txt).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));
 }
 
-// ── Google Calendar ──
-function connectGcal() {
-  const clientId=gcalClientId||document.getElementById('gcal-client-id').value;
-  if (!clientId) { alert('クライアントIDを入力してください'); return; }
-  const scope='https://www.googleapis.com/auth/calendar.events';
-  const redirectUri='https://cmkmoneyshift.netlify.app';
-  const url=`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}`;
-  window.open(url,'gcal_auth','width=500,height=600');
-  document.getElementById('gcal-status').textContent='ポップアップでGoogleアカウントにログインしてください';
+// ── Google Calendar（GIS方式）──
+function updateGcalUI(connected) {
+  document.getElementById('gcal-connect-area').style.display = connected ? 'none' : 'block';
+  document.getElementById('gcal-connected-area').style.display = connected ? 'block' : 'none';
 }
+
+function connectGcal() {
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: GCAL_CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/calendar.events',
+    callback: (response) => {
+      if (response.access_token) {
+        gcalToken = response.access_token;
+        try { localStorage.setItem('gcal_token', gcalToken); } catch(e) {}
+        updateGcalUI(true);
+      } else {
+        alert('接続に失敗しました。もう一度お試しください。');
+      }
+    },
+  });
+  client.requestAccessToken();
+}
+
+function disconnectGcal() {
+  gcalToken = null;
+  try { localStorage.removeItem('gcal_token'); } catch(e) {}
+  updateGcalUI(false);
+}
+
 function syncToGcal(shift) {
   if (!gcalToken) return;
-  const isClass=!TYPE_HOURLY[shift.type];
-  fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
-    method:'POST',
-    headers:{'Authorization':'Bearer '+gcalToken,'Content-Type':'application/json'},
-    body:JSON.stringify({
-      summary:TYPE_LABEL[shift.type]+(shift.memo?' - '+shift.memo:''),
-      start:{dateTime:`${shift.date}T${shift.start}:00`,timeZone:'Asia/Tokyo'},
-      end:{dateTime:`${shift.date}T${shift.end}:00`,timeZone:'Asia/Tokyo'},
-      reminders:{useDefault:false,overrides:isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
+  const isClass = !TYPE_HOURLY[shift.type];
+  fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+    method: 'POST',
+    headers: {'Authorization':'Bearer '+gcalToken,'Content-Type':'application/json'},
+    body: JSON.stringify({
+      summary: TYPE_LABEL[shift.type]+(shift.memo?' - '+shift.memo:''),
+      start: {dateTime:`${shift.date}T${shift.start}:00`,timeZone:'Asia/Tokyo'},
+      end:   {dateTime:`${shift.date}T${shift.end}:00`,timeZone:'Asia/Tokyo'},
+      reminders: {useDefault:false, overrides: isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
     })
   }).catch(()=>{});
 }
 
-// ── Export / Import ──
 function exportData() {
   const blob=new Blob([JSON.stringify({version:APP_VERSION,shifts,rates},null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -655,7 +569,7 @@ function handleImport(e) {
       if (data.shifts) { shifts=data.shifts; save(); }
       if (data.rates) { rates={...rates,...data.rates}; try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){} }
       renderShifts(); renderMetrics(); checkConflicts();
-      initSettingsFields();
+      ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
       alert('インポートしました');
     } catch(ex) { alert('ファイルの読み込みに失敗しました'); }
   };
@@ -667,24 +581,17 @@ function clearAll() {
   }
 }
 
-// ── Init ──
-function initSettingsFields() {
-  ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
-  document.getElementById('gcal-client-id').value=gcalClientId||'';
-}
-
 function init() {
   load();
   document.getElementById('new-date').value=new Date().toISOString().slice(0,10);
   const now=new Date();
   document.getElementById('bulk-month').value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  initSettingsFields();
+  ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
   onTypeChange();
   renderShifts(); renderMetrics(); checkConflicts(); buildWeekGrid();
 }
 init();
 
-// ── Service Worker registration ──
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
