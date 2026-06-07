@@ -13,7 +13,7 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
-  import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged }
+  import { getAuth, signInWithRedirect, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, getRedirectResult }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
   import { getFirestore, doc, setDoc, onSnapshot }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
@@ -36,7 +36,7 @@
   window.firebaseSignIn = async function() {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch(e) { alert('ログインに失敗しました: ' + e.message); }
   };
 
@@ -52,6 +52,9 @@
       document.getElementById('sync-status').textContent = '最終同期: ' + new Date().toLocaleTimeString('ja-JP');
     } catch(e) { console.warn('Firebase save error', e); }
   };
+
+  // リダイレクト後の結果を処理
+  getRedirectResult(auth).catch(e => console.warn('redirect result:', e));
 
   onAuthStateChanged(auth, user => {
     if (user) {
