@@ -587,6 +587,7 @@ function renderMetrics() {
   let komaNomal=0, komaCamp=0, hTraining=0, hDev=0, hMtg=0, hSns=0, pay=0;
   list.forEach(s => {
     if (s.closed) {
+      hMtg += 0.25;
       pay += (rates.close||0)*0.25;
     } else if (s.type==='normal') {
       komaNomal++; pay += (rates.normal||0);
