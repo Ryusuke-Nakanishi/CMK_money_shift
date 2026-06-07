@@ -36,7 +36,7 @@
     try {
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      provider.setCustomParameters({ prompt: 'consent' });
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential && credential.accessToken) {
@@ -177,7 +177,7 @@
   .panel.active { display: flex; flex-direction: column; gap: 14px; }
   .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
   .section-title { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
-  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .metric-card { background: var(--bg2); border-radius: var(--radius-sm); padding: 12px; }
   .metric-card .label { font-size: 11px; color: var(--text2); margin-bottom: 4px; line-height: 1.3; }
   .metric-card .value { font-size: 18px; font-weight: 600; }
@@ -256,8 +256,12 @@
   <div id="tab-shifts" class="panel active">
     <div id="conflict-zone"></div>
     <div class="metrics">
-      <div class="metric-card"><div class="label">授業コマ数</div><div class="value" id="m-koma">0</div></div>
-      <div class="metric-card"><div class="label">講師外 時間</div><div class="value" id="m-hours">0h</div></div>
+      <div class="metric-card"><div class="label">通常コマ数</div><div class="value" id="m-koma-normal">0</div></div>
+      <div class="metric-card"><div class="label">キャンプコマ数</div><div class="value" id="m-koma-camp">0</div></div>
+      <div class="metric-card"><div class="label">研修業務</div><div class="value" id="m-hours-training">0h</div></div>
+      <div class="metric-card"><div class="label">教材開発</div><div class="value" id="m-hours-dev">0h</div></div>
+      <div class="metric-card"><div class="label">その他MTG</div><div class="value" id="m-hours-mtg">0h</div></div>
+      <div class="metric-card"><div class="label">SNSマーケティング</div><div class="value" id="m-hours-sns">0h</div></div>
       <div class="metric-card"><div class="label">概算報酬</div><div class="value" id="m-pay">¥0</div></div>
     </div>
     <div class="card">
@@ -271,6 +275,7 @@
             <option value="training">研修業務</option>
             <option value="dev">教材開発</option>
             <option value="mtg">その他MTG</option>
+            <option value="sns">SNSマーケティング</option>
           </select>
         </div>
         <div class="form-group"><label>日付</label><input type="date" id="new-date"></div>
@@ -315,6 +320,7 @@
             <option value="training">研修業務</option>
             <option value="dev">教材開発</option>
             <option value="mtg">その他MTG</option>
+            <option value="sns">SNSマーケティング</option>
           </select>
         </div>
         <div class="form-group"><label>対象年月</label><input type="month" id="bulk-month" onchange="buildWeekGrid()"></div>
@@ -368,8 +374,11 @@
         <div class="form-group"><label>研修業務</label><input type="number" id="rate-training" onchange="saveRates()"></div>
         <div class="form-group"><label>教材開発</label><input type="number" id="rate-dev" onchange="saveRates()"></div>
       </div>
-      <div class="form-grid">
+      <div class="form-grid" style="margin-bottom:10px">
         <div class="form-group"><label>その他MTG（時給）</label><input type="number" id="rate-mtg" onchange="saveRates()"></div>
+        <div class="form-group"><label>SNSマーケティング（時給）</label><input type="number" id="rate-sns" onchange="saveRates()"></div>
+      </div>
+      <div class="form-grid">
         <div class="form-group"><label>授業クローズ（時給・15分固定）</label><input type="number" id="rate-close" onchange="saveRates()"></div>
       </div>
       <p class="rate-note">授業クローズは15分（×0.25）で請求額を計算し、講師外業務として請求書に載ります。</p>
@@ -415,16 +424,16 @@ const APP_VERSION = '2.0.0';
 document.getElementById('ver-badge').textContent  = 'v' + APP_VERSION;
 document.getElementById('ver-display').textContent = APP_VERSION;
 
-const TYPE_LABEL   = {normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG'};
-const TYPE_GCAL    = {normal:'【通常】',camp:'【キャンプ】',training:'【研修】',dev:'【開発】',mtg:'【MTG】'};
-const TYPE_COLOR   = {normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556'};
-const TYPE_INVOICE = {normal:false,camp:true,training:true,dev:true,mtg:true};
-const TYPE_HOURLY  = {normal:false,camp:false,training:true,dev:true,mtg:true};
+const TYPE_LABEL   = {normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG',sns:'SNSマーケティング'};
+const TYPE_GCAL    = {normal:'【通常】',camp:'【キャンプ】',training:'【研修】',dev:'【開発】',mtg:'【MTG】',sns:'【SNS】'};
+const TYPE_COLOR   = {normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556',sns:'#0e7490'};
+const TYPE_INVOICE = {normal:false,camp:true,training:true,dev:true,mtg:true,sns:true};
+const TYPE_HOURLY  = {normal:false,camp:false,training:true,dev:true,mtg:true,sns:true};
 const DAYS_JA      = ['日','月','火','水','木','金','土'];
 const WEEK_LABELS  = ['第1週','第2週','第3週','第4週','第5週'];
 
 let shifts    = [];
-let rates     = {normal:0,camp:0,training:0,dev:0,mtg:0,close:0};
+let rates     = {normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};
 let viewMonth = new Date(); viewMonth.setDate(1);
 
 // Googleカレンダートークン
@@ -441,7 +450,7 @@ window.onFirebaseDataLoaded = function() {
   if (window._fbRates  !== null) rates  = {...rates, ...window._fbRates};
   saveLocal();
   renderShifts(); renderMetrics(); checkConflicts();
-  ['normal','camp','training','dev','mtg','close'].forEach(k => {
+  ['normal','camp','training','dev','mtg','sns','close'].forEach(k => {
     const el = document.getElementById('rate-'+k); if (el) el.value = rates[k] || '';
   });
 };
@@ -465,7 +474,7 @@ function save() {
   if (typeof window.saveToFirebase === 'function') window.saveToFirebase(shifts, rates);
 }
 function saveRates() {
-  ['normal','camp','training','dev','mtg','close'].forEach(k => {
+  ['normal','camp','training','dev','mtg','sns','close'].forEach(k => {
     const el = document.getElementById('rate-'+k); if (el) rates[k] = parseFloat(el.value)||0;
   });
   try { localStorage.setItem('rates_v2', JSON.stringify(rates)); } catch(e) {}
@@ -575,14 +584,30 @@ function changeMonth(d) { viewMonth.setMonth(viewMonth.getMonth()+d); renderShif
 function renderMetrics() {
   const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
   const list = shifts.filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; });
-  let koma=0, hours=0, pay=0;
+  let komaNomal=0, komaCamp=0, hTraining=0, hDev=0, hMtg=0, hSns=0, pay=0;
   list.forEach(s => {
-    if (s.closed) { hours += 0.25; pay += (rates.close||0)*0.25; }
-    else if (TYPE_HOURLY[s.type]) { const h=durationH(s.start,s.end); hours+=h; pay+=h*(rates[s.type]||0); }
-    else { koma++; pay += (rates[s.type]||0); }
+    if (s.closed) {
+      pay += (rates.close||0)*0.25;
+    } else if (s.type==='normal') {
+      komaNomal++; pay += (rates.normal||0);
+    } else if (s.type==='camp') {
+      komaCamp++; pay += (rates.camp||0);
+    } else if (s.type==='training') {
+      const h=durationH(s.start,s.end); hTraining+=h; pay+=h*(rates.training||0);
+    } else if (s.type==='dev') {
+      const h=durationH(s.start,s.end); hDev+=h; pay+=h*(rates.dev||0);
+    } else if (s.type==='mtg') {
+      const h=durationH(s.start,s.end); hMtg+=h; pay+=h*(rates.mtg||0);
+    } else if (s.type==='sns') {
+      const h=durationH(s.start,s.end); hSns+=h; pay+=h*(rates.sns||0);
+    }
   });
-  document.getElementById('m-koma').textContent = koma+'コマ';
-  document.getElementById('m-hours').textContent = hours.toFixed(2)+'h';
+  document.getElementById('m-koma-normal').textContent = komaNomal+'コマ';
+  document.getElementById('m-koma-camp').textContent = komaCamp+'コマ';
+  document.getElementById('m-hours-training').textContent = hTraining.toFixed(2)+'h';
+  document.getElementById('m-hours-dev').textContent = hDev.toFixed(2)+'h';
+  document.getElementById('m-hours-mtg').textContent = hMtg.toFixed(2)+'h';
+  document.getElementById('m-hours-sns').textContent = hSns.toFixed(2)+'h';
   document.getElementById('m-pay').textContent = '¥'+Math.round(pay).toLocaleString();
 }
 
@@ -691,7 +716,7 @@ function generateInvoice() {
     lines.push('講師外業務');
     outerShifts.forEach(s=>{
       const d = new Date(s.date);
-      const label = s.type==='training'?'研修業務':s.type==='dev'?'教材開発':'その他MTG';
+      const label = s.type==='training'?'研修業務':s.type==='dev'?'教材開発':s.type==='sns'?'SNSマーケティング':'その他MTG';
       lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (${label})`);
     });
     closedShifts.forEach(s=>{
@@ -756,7 +781,7 @@ function handleImport(e) {
       if (data.shifts) { shifts=data.shifts; saveLocal(); }
       if (data.rates)  { rates={...rates,...data.rates}; try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){} }
       renderShifts(); renderMetrics(); checkConflicts();
-      ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
+      ['normal','camp','training','dev','mtg','sns','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
       alert('インポートしました');
     } catch(ex) { alert('ファイルの読み込みに失敗しました'); }
   };
@@ -773,7 +798,7 @@ function init() {
   document.getElementById('new-date').value = toLocalDateStr(new Date());
   const now = new Date();
   document.getElementById('bulk-month').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  ['normal','camp','training','dev','mtg','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
+  ['normal','camp','training','dev','mtg','sns','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
   renderShifts(); renderMetrics(); checkConflicts(); buildWeekGrid();
 }
 init();
