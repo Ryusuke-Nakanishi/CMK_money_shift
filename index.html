@@ -315,11 +315,8 @@
     <div class="card">
       <div class="section-title">Google カレンダー連携</div>
       <div class="gcal-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:10px">GCP OAuth クライアントIDを入力後、接続してください。接続後は授業の15分前に通知が届きます。</p>
-        <div class="form-group" style="margin-bottom:10px">
-          <label>OAuth クライアントID</label>
-          <input type="text" id="gcal-client-id" placeholder="xxxxx.apps.googleusercontent.com" onchange="saveGcal()">
-        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Googleアカウントを接続してください。接続後はGoogleカレンダーと同期され、カレンダー登録＆授業の15分前に通知が届きます。</p>
+        
         <button class="btn btn-primary" onclick="connectGcal()">Google アカウントで接続</button>
         <div id="gcal-status" style="font-size:13px;color:var(--text2);margin-top:8px"></div>
       </div>
