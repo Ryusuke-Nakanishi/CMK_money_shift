@@ -6,10 +6,10 @@
 <meta name="theme-color" content="#1a1a1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="シフト管理">
+<meta name="apple-mobile-web-app-title" content="CMKシフト管理">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>シフト・請求書管理</title>
+<title>ClassmallKids シフト・請求書管理</title>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
   import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged }
@@ -29,9 +29,10 @@
   const app  = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
-  let unsubscribe = null;
+  let unsubscribe      = null;
+  let tokenExpireTimer = null;
+  let autoSignOutTimer = null;
 
-  // Googleログイン（カレンダー連携も同時に取得）
   window.googleSignIn = async function() {
     try {
       const provider = new GoogleAuthProvider();
@@ -40,191 +41,244 @@
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential && credential.accessToken) {
+        const now = Date.now();
         window._gcalToken = credential.accessToken;
-        try { localStorage.setItem('gcal_token', credential.accessToken); } catch(e) {}
-        if (typeof window.onGcalConnected === 'function') window.onGcalConnected();
+        try {
+          localStorage.setItem('gcal_token', credential.accessToken);
+          localStorage.setItem('gcal_token_time', now);
+          localStorage.setItem('gcal_uid', result.user.uid);
+        } catch(e) {}
+        scheduleTokenExpiry(55 * 60 * 1000);
+        scheduleAutoSignOut(60 * 60 * 1000);
       }
     } catch(e) {
-      alert('ログインに失敗しました: ' + e.message);
+      if (e.code !== 'auth/popup-closed-by-user') alert('ログインに失敗しました: ' + e.message);
     }
   };
 
-  // ログアウト
+  function scheduleTokenExpiry(ms) {
+    if (tokenExpireTimer) clearTimeout(tokenExpireTimer);
+    tokenExpireTimer = setTimeout(() => {
+      window._gcalToken = null;
+      try { localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); } catch(e) {}
+      setStatusBar('expired', auth.currentUser?.displayName || auth.currentUser?.email || '');
+    }, ms);
+  }
+
+  function scheduleAutoSignOut(ms) {
+    if (autoSignOutTimer) clearTimeout(autoSignOutTimer);
+    autoSignOutTimer = setTimeout(() => {
+      if (typeof window.showReloginModal === 'function') window.showReloginModal();
+    }, ms);
+  }
+
   window.googleSignOut = async function() {
-    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    clearAllTimers();
     window._gcalToken = null;
-    try { localStorage.removeItem('gcal_token'); } catch(e) {}
+    try { localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); localStorage.removeItem('gcal_uid'); } catch(e) {}
     await signOut(auth);
     updateAuthUI(null);
+    if (typeof window.onSignedOut === 'function') window.onSignedOut();
   };
 
-  // データ保存
-  window.saveToFirebase = async function(shifts, rates) {
+  function clearAllTimers() {
+    if (unsubscribe)      { unsubscribe(); unsubscribe = null; }
+    if (tokenExpireTimer) { clearTimeout(tokenExpireTimer); tokenExpireTimer = null; }
+    if (autoSignOutTimer) { clearTimeout(autoSignOutTimer); autoSignOutTimer = null; }
+  }
+
+  window.saveToFirebase = async function(shifts, rates, rateHistory, payments) {
     const user = auth.currentUser; if (!user) return;
     try {
-      await setDoc(doc(db, 'users', user.uid), { shifts, rates, updatedAt: Date.now() });
+      await setDoc(doc(db, 'users', user.uid), { shifts, rates, rateHistory: rateHistory||[], payments: payments||{}, updatedAt: Date.now() });
       setStatusBar('synced', user.displayName || user.email);
     } catch(e) { console.warn('Firebase save error', e); }
   };
 
-  // ステータスバー更新
   function setStatusBar(state, name) {
     const bar = document.getElementById('status-bar');
     if (!bar) return;
-    if (state === 'synced') {
-      bar.style.display = 'flex';
-      bar.style.background = 'var(--success-bg)';
-      bar.style.color = 'var(--success-text)';
-      bar.style.borderBottom = '0.5px solid var(--success-text)';
-      bar.innerHTML = `✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">${new Date().toLocaleTimeString('ja-JP')}</span>`;
+    if (state === 'checking') {
+      bar.style.display='flex'; bar.style.background='var(--bg3)'; bar.style.color='var(--text3)'; bar.style.borderBottom='0.5px solid var(--border)';
+      bar.innerHTML='確認中...';
+    } else if (state === 'synced') {
+      bar.style.display='flex'; bar.style.background='var(--success-bg)'; bar.style.color='var(--success-text)'; bar.style.borderBottom='0.5px solid var(--success-text)';
+      bar.innerHTML=`✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">${new Date().toLocaleTimeString('ja-JP')}</span>`;
     } else if (state === 'syncing') {
-      bar.style.display = 'flex';
-      bar.style.background = 'var(--warning-bg)';
-      bar.style.color = 'var(--warning-text)';
-      bar.style.borderBottom = '0.5px solid var(--close-color)';
-      bar.innerHTML = `⟳ 同期中...`;
+      bar.style.display='flex'; bar.style.background='var(--warning-bg)'; bar.style.color='var(--warning-text)'; bar.style.borderBottom='0.5px solid var(--close-color)';
+      bar.innerHTML='⟳ 同期中...';
+    } else if (state === 'expired') {
+      bar.style.display='flex'; bar.style.background='var(--danger-bg)'; bar.style.color='var(--danger-text)'; bar.style.borderBottom='0.5px solid var(--danger-text)';
+      bar.innerHTML=`⚠ カレンダー連携が切れました &nbsp;<button onclick="googleSignIn()" style="font-size:11px;padding:2px 8px;cursor:pointer;border:0.5px solid var(--danger-text);border-radius:4px;background:none;color:var(--danger-text)">再接続</button>`;
     } else {
-      bar.style.display = 'none';
+      bar.style.display='none';
     }
+    window._statusState = state;
   }
 
-  // 認証UI更新
   function updateAuthUI(user) {
-    const signinArea  = document.getElementById('auth-signin-area');
-    const signoutArea = document.getElementById('auth-signout-area');
-    const userName    = document.getElementById('auth-user-name');
+    const signinArea=document.getElementById('auth-signin-area');
+    const signoutArea=document.getElementById('auth-signout-area');
+    const userName=document.getElementById('auth-user-name');
     if (!signinArea) return;
-    if (user) {
-      signinArea.style.display  = 'none';
-      signoutArea.style.display = 'block';
-      if (userName) userName.textContent = user.displayName || user.email;
-    } else {
-      signinArea.style.display  = 'block';
-      signoutArea.style.display = 'none';
-      setStatusBar('disconnected', '');
-    }
+    if (user) { signinArea.style.display='none'; signoutArea.style.display='block'; if(userName) userName.textContent=user.displayName||user.email; }
+    else { signinArea.style.display='block'; signoutArea.style.display='none'; setStatusBar('none',''); }
   }
 
-  // リアルタイム同期
   function startSync(user) {
     if (unsubscribe) unsubscribe();
     setStatusBar('syncing', user.displayName || user.email);
     unsubscribe = onSnapshot(doc(db, 'users', user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
-        if (data.shifts) window._fbShifts = data.shifts;
-        if (data.rates)  window._fbRates  = data.rates;
+        if (data.shifts)      window._fbShifts     = data.shifts;
+        if (data.rates)       window._fbRates       = data.rates;
+        if (data.rateHistory) window._fbRateHistory = data.rateHistory;
+        if (data.payments)    window._fbPayments    = data.payments;
         if (typeof window.onFirebaseDataLoaded === 'function') window.onFirebaseDataLoaded();
       }
       setStatusBar('synced', user.displayName || user.email);
-    }, err => console.warn('snapshot error', err));
+    }, err => { console.warn('snapshot error', err); setStatusBar('expired', user.displayName || user.email); });
   }
 
-  // 認証状態監視
+  setStatusBar('checking', '');
   onAuthStateChanged(auth, user => {
     updateAuthUI(user);
     if (user) {
-      // カレンダートークンをlocalStorageから復元
+      const prevUid = localStorage.getItem('gcal_uid');
+      if (prevUid && prevUid !== user.uid) {
+        localStorage.removeItem('shifts_v3'); localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time');
+        if (typeof window.onAccountChanged === 'function') window.onAccountChanged();
+      }
+      localStorage.setItem('gcal_uid', user.uid);
       const t = localStorage.getItem('gcal_token');
-      if (t) {
+      const tokenTime = parseInt(localStorage.getItem('gcal_token_time') || '0');
+      const elapsed = Date.now() - tokenTime;
+      if (t && elapsed < 55 * 60 * 1000) {
         window._gcalToken = t;
-        if (typeof window.onGcalConnected === 'function') window.onGcalConnected();
+        scheduleTokenExpiry(55 * 60 * 1000 - elapsed);
+        scheduleAutoSignOut(60 * 60 * 1000 - elapsed);
+      } else if (t) {
+        localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); window._gcalToken = null;
       }
       startSync(user);
     } else {
-      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+      clearAllTimers(); setStatusBar('none', '');
     }
   });
 </script>
 <style>
-  :root {
-    --bg: #ffffff; --bg2: #f5f5f5; --bg3: #eeeeee;
-    --text: #111111; --text2: #666666; --text3: #999999;
-    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
-    --accent: #111111; --accent-text: #ffffff;
-    --success-bg: #edfaef; --success-text: #1a7a32;
-    --danger-bg: #fdecea; --danger-text: #c0392b;
-    --warning-bg: #fff8e1; --warning-text: #b45309;
-    --close-color: #d97706; --radius: 10px; --radius-sm: 6px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111111; --bg2: #1e1e1e; --bg3: #2a2a2a;
-      --text: #f0f0f0; --text2: #aaaaaa; --text3: #666666;
-      --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.2);
-      --accent: #f0f0f0; --accent-text: #111111;
-      --success-bg: #0d2e14; --success-text: #4ade80;
-      --danger-bg: #2e0d0d; --danger-text: #f87171;
-      --warning-bg: #2e1f00; --warning-text: #fbbf24;
-      --close-color: #fbbf24;
-    }
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-  #update-banner { position: fixed; top: 0; left: 0; right: 0; background: var(--accent); color: var(--accent-text); font-size: 13px; padding: 10px 16px; z-index: 9999; display: none; align-items: center; justify-content: space-between; gap: 8px; }
-  #update-banner button { background: var(--accent-text); color: var(--accent); border: none; border-radius: 4px; padding: 4px 12px; font-size: 13px; cursor: pointer; }
-  .header { position: sticky; top: 0; z-index: 100; background: var(--bg); border-bottom: 0.5px solid var(--border); }
-  #status-bar { display: none; max-width: 100%; padding: 6px 16px; font-size: 12px; align-items: center; gap: 6px; }
-  .header-inner { max-width: 720px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; }
-  .header h1 { font-size: 17px; font-weight: 600; }
-  .version-badge { font-size: 11px; color: var(--text3); background: var(--bg3); padding: 2px 8px; border-radius: 20px; }
-  .tabs { max-width: 720px; margin: 0 auto; display: flex; overflow-x: auto; scrollbar-width: none; }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tab { flex: 1; min-width: 70px; padding: 10px 4px; font-size: 13px; text-align: center; cursor: pointer; border: none; background: none; color: var(--text2); border-bottom: 2px solid transparent; transition: all .15s; white-space: nowrap; }
-  .tab.active { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
-  .content { max-width: 720px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-  .panel { display: none; }
-  .panel.active { display: flex; flex-direction: column; gap: 14px; }
-  .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
-  .section-title { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
-  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .metric-card { background: var(--bg2); border-radius: var(--radius-sm); padding: 12px; }
-  .metric-card .label { font-size: 11px; color: var(--text2); margin-bottom: 4px; line-height: 1.3; }
-  .metric-card .value { font-size: 18px; font-weight: 600; }
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .form-group { display: flex; flex-direction: column; gap: 4px; }
-  .form-group label { font-size: 12px; color: var(--text2); }
-  .form-group input, .form-group select { font-size: 15px; padding: 9px 11px; border: 0.5px solid var(--border2); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); width: 100%; appearance: auto; }
-  .form-group input:focus, .form-group select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .btn { padding: 9px 16px; border-radius: var(--radius-sm); border: 0.5px solid var(--border2); background: var(--bg); color: var(--text); font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: opacity .15s; font-family: inherit; }
-  .btn:active { opacity: .7; }
-  .btn-primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 500; }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
-  .btn-danger { color: var(--danger-text); border-color: var(--danger-text); }
-  .btn-warn { color: var(--warning-text); border-color: var(--close-color); font-size: 12px; padding: 5px 10px; }
-  .btn-reopen { color: var(--success-text); border-color: var(--success-text); font-size: 12px; padding: 5px 10px; }
-  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .alert { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
-  .alert-danger { background: var(--danger-bg); color: var(--danger-text); border: 0.5px solid var(--danger-text); }
-  .month-nav { display: flex; align-items: center; gap: 8px; }
-  .month-nav span { font-size: 15px; font-weight: 500; min-width: 80px; text-align: center; }
-  .shift-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
-  .shift-item:last-child { border-bottom: none; }
-  .shift-item.has-conflict { background: var(--danger-bg); border-radius: var(--radius-sm); padding: 10px 8px; margin-bottom: 2px; border-bottom: none; }
-  .shift-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
-  .shift-body { flex: 1; min-width: 0; }
-  .shift-title { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .shift-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
-  .shift-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
-  .closed-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--warning-bg); color: var(--warning-text); font-weight: 500; white-space: nowrap; }
-  .gcal-badge { font-size: 11px; padding: 2px 6px; border-radius: 20px; background: var(--success-bg); color: var(--success-text); font-weight: 500; }
-  .conflict-badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--danger-bg); color: var(--danger-text); font-weight: 500; white-space: nowrap; }
-  .invoice-out { font-family: 'Courier New', monospace; font-size: 14px; line-height: 2; white-space: pre-wrap; background: var(--bg2); border-radius: var(--radius-sm); padding: 14px; color: var(--text); min-height: 160px; }
-  .week-block { border: 0.5px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; overflow: hidden; }
-  .week-header { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--bg2); cursor: pointer; font-size: 14px; font-weight: 500; }
-  .week-body { padding: 10px 12px; display: none; }
-  .week-body.open { display: block; }
-  .day-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-  .day-btn { width: 36px; height: 36px; border-radius: 50%; border: 0.5px solid var(--border2); background: var(--bg); color: var(--text2); font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .1s; }
-  .day-btn.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-  .day-btn:disabled { opacity: .3; cursor: default; }
-  .rate-note { font-size: 12px; color: var(--text3); margin-top: 6px; line-height: 1.5; }
-  .divider { height: 0.5px; background: var(--border); margin: 12px 0; }
-  .auth-box { border: 0.5px dashed var(--border2); border-radius: var(--radius-sm); padding: 14px; }
-  .flash { font-size: 13px; margin-top: 8px; display: none; padding: 6px 10px; border-radius: var(--radius-sm); }
-  .flash.ok  { background: var(--success-bg); color: var(--success-text); display: block; }
-  .flash.err { background: var(--danger-bg);  color: var(--danger-text);  display: block; }
-  .connected-box { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--success-text); background: var(--success-bg); padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 8px; }
+:root{--bg:#fff;--bg2:#f5f5f5;--bg3:#eee;--text:#111;--text2:#666;--text3:#999;--border:rgba(0,0,0,.12);--border2:rgba(0,0,0,.22);--accent:#111;--accent-text:#fff;--success-bg:#edfaef;--success-text:#1a7a32;--danger-bg:#fdecea;--danger-text:#c0392b;--warning-bg:#fff8e1;--warning-text:#b45309;--close-color:#d97706;--radius:10px;--radius-sm:6px}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--bg2:#1e1e1e;--bg3:#2a2a2a;--text:#f0f0f0;--text2:#aaa;--text3:#666;--border:rgba(255,255,255,.1);--border2:rgba(255,255,255,.2);--accent:#f0f0f0;--accent-text:#111;--success-bg:#0d2e14;--success-text:#4ade80;--danger-bg:#2e0d0d;--danger-text:#f87171;--warning-bg:#2e1f00;--warning-text:#fbbf24;--close-color:#fbbf24}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+#update-banner{position:fixed;top:0;left:0;right:0;background:var(--accent);color:var(--accent-text);font-size:13px;padding:10px 16px;z-index:9999;display:none;align-items:center;justify-content:space-between;gap:8px}
+#update-banner button{background:var(--accent-text);color:var(--accent);border:none;border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer}
+.header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:.5px solid var(--border)}
+#status-bar{display:none;max-width:100%;padding:6px 16px;font-size:12px;align-items:center;gap:6px}
+.header-inner{max-width:720px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
+.header h1{font-size:17px;font-weight:600}
+.version-badge{font-size:11px;color:var(--text3);background:var(--bg3);padding:2px 8px;border-radius:20px}
+.tabs{max-width:720px;margin:0 auto;display:flex;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1;min-width:48px;padding:10px 2px;font-size:11px;text-align:center;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab.active{color:var(--text);border-bottom-color:var(--text);font-weight:500}
+.content{max-width:720px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.panel{display:none}
+.panel.active{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.section-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.metric-card{background:var(--bg2);border-radius:var(--radius-sm);padding:12px}
+.metric-card .label{font-size:11px;color:var(--text2);margin-bottom:4px;line-height:1.3}
+.metric-card .value{font-size:18px;font-weight:600}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group label{font-size:12px;color:var(--text2)}
+.form-group input,.form-group select{font-size:15px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;appearance:auto}
+.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}
+.btn{padding:9px 16px;border-radius:var(--radius-sm);border:.5px solid var(--border2);background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;font-family:inherit}
+.btn:active{opacity:.7}
+.btn-primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:500}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-edit{color:var(--text2);border-color:var(--border2);font-size:12px;padding:4px 8px}
+.btn-danger{color:var(--danger-text);border-color:var(--danger-text)}
+.btn-warn{color:var(--warning-text);border-color:var(--close-color);font-size:12px;padding:5px 10px}
+.btn-reopen{color:var(--success-text);border-color:var(--success-text);font-size:12px;padding:5px 10px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.alert{border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
+.alert-danger{background:var(--danger-bg);color:var(--danger-text);border:.5px solid var(--danger-text)}
+.month-nav{display:flex;align-items:center;gap:8px}
+.month-nav span{font-size:15px;font-weight:500;min-width:80px;text-align:center}
+.shift-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:.5px solid var(--border)}
+.shift-item:last-child{border-bottom:none}
+.shift-item.has-conflict{background:var(--danger-bg);border-radius:var(--radius-sm);padding:10px 8px;margin-bottom:2px;border-bottom:none}
+.shift-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.shift-body{flex:1;min-width:0}
+.shift-title{font-size:14px;font-weight:500;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.shift-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.shift-actions{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.closed-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--warning-bg);color:var(--warning-text);font-weight:500;white-space:nowrap}
+.gcal-badge{font-size:11px;padding:2px 6px;border-radius:20px;background:var(--success-bg);color:var(--success-text);font-weight:500}
+.conflict-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--danger-bg);color:var(--danger-text);font-weight:500;white-space:nowrap}
+.invoice-out{font-family:'Courier New',monospace;font-size:14px;line-height:2;white-space:pre-wrap;background:var(--bg2);border-radius:var(--radius-sm);padding:14px;color:var(--text);min-height:160px}
+.week-block{border:.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden}
+.week-header{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg2);cursor:pointer;font-size:14px;font-weight:500}
+.week-body{padding:10px 12px;display:none}
+.week-body.open{display:block}
+.day-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.day-btn{width:36px;height:36px;border-radius:50%;border:.5px solid var(--border2);background:var(--bg);color:var(--text2);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .1s}
+.day-btn.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.day-btn:disabled{opacity:.3;cursor:default}
+.rate-note{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.5}
+.divider{height:.5px;background:var(--border);margin:12px 0}
+.auth-box{border:.5px dashed var(--border2);border-radius:var(--radius-sm);padding:14px}
+.flash{font-size:13px;margin-top:8px;display:none;padding:6px 10px;border-radius:var(--radius-sm)}
+.flash.ok{background:var(--success-bg);color:var(--success-text);display:block}
+.flash.err{background:var(--danger-bg);color:var(--danger-text);display:block}
+.connected-box{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--success-text);background:var(--success-bg);padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:8px}
+.year-nav{display:flex;align-items:center;gap:8px}
+.year-nav span{font-size:15px;font-weight:500;min-width:60px;text-align:center}
+.annual-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.annual-card{background:var(--bg2);border-radius:var(--radius-sm);padding:12px}
+.annual-card .label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.annual-card .value{font-size:18px;font-weight:600}
+.progress-bar-wrap{background:var(--bg3);border-radius:20px;height:8px;margin-top:8px;overflow:hidden}
+.progress-bar-fill{height:100%;border-radius:20px;background:var(--accent);transition:width .4s}
+.monthly-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border);font-size:14px}
+.monthly-row:last-child{border-bottom:none}
+.rate-history-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border);font-size:13px}
+.rate-history-item:last-child{border-bottom:none}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg);border-radius:var(--radius);padding:20px;width:100%;max-width:400px}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+.relogin-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:none;align-items:center;justify-content:center;padding:16px}
+.relogin-overlay.open{display:flex}
+.relogin-modal{background:var(--bg);border-radius:var(--radius);padding:24px;width:100%;max-width:360px;text-align:center}
+.relogin-modal h3{font-size:18px;font-weight:600;margin-bottom:12px}
+.relogin-modal p{font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.6}
+/* ホーム */
+.today-shift-item{display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg2);border-radius:var(--radius-sm);margin-bottom:8px}
+.today-shift-item:last-child{margin-bottom:0}
+.no-shift{text-align:center;padding:24px;color:var(--text3);font-size:14px}
+/* ミニカレンダー */
+.mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.mini-cal-day-header{font-size:11px;color:var(--text3);padding:4px 0}
+.mini-cal-day{font-size:12px;padding:6px 2px;border-radius:var(--radius-sm);position:relative}
+.mini-cal-day.today{background:var(--accent);color:var(--accent-text);font-weight:700}
+.mini-cal-day.has-shift::after{content:'';position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--success-text)}
+.mini-cal-day.today.has-shift::after{background:var(--accent-text)}
+.mini-cal-day.other-month{color:var(--text3)}
+.mini-cal-day.sun{color:var(--danger-text)}
+.mini-cal-day.sat{color:#2563eb}
+.mini-cal-day.today.sun,.mini-cal-day.today.sat{color:var(--accent-text)}
+/* マニュアル */
+.manual-section{margin-bottom:16px}
+.manual-section h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.manual-section p,.manual-section li{font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:4px}
+.manual-section ul{padding-left:20px}
 </style>
 </head>
 <body>
@@ -234,17 +288,47 @@
   <button onclick="location.reload()">更新する</button>
 </div>
 
+<div class="relogin-overlay" id="relogin-modal">
+  <div class="relogin-modal">
+    <h3>⏱ セッションが切れました</h3>
+    <p>セキュリティのため、1時間ごとに再ログインが必要です。データは保持されています。</p>
+    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="reloginAndClose()">🔗 再ログイン</button>
+    <button class="btn" style="width:100%;justify-content:center;margin-top:8px" onclick="closeReloginModal()">後で行う</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <h3>シフトを編集</h3>
+    <input type="hidden" id="edit-shift-id">
+    <div class="form-grid" style="margin-bottom:10px">
+      <div class="form-group"><label>開始時刻</label><input type="time" id="edit-start"></div>
+      <div class="form-group"><label>終了時刻</label><input type="time" id="edit-end"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>担当コース・メモ</label><input type="text" id="edit-memo">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
 <div class="header">
   <div id="status-bar"></div>
   <div class="header-inner">
-    <h1>シフト・請求書管理</h1>
-    <span class="version-badge" id="ver-badge">v2.0.0</span>
+    <h1>CMK シフト管理</h1>
+    <span class="version-badge" id="ver-badge">v3.1.0</span>
   </div>
   <nav>
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('shifts')">📅 シフト</button>
-      <button class="tab" onclick="switchTab('bulk')">📋 一括登録</button>
+      <button class="tab active" onclick="switchTab('home')">🏠 ホーム</button>
+      <button class="tab" onclick="switchTab('shifts')">📅 シフト</button>
+      <button class="tab" onclick="switchTab('bulk')">📋 一括</button>
       <button class="tab" onclick="switchTab('invoice')">📄 請求書</button>
+      <button class="tab" onclick="switchTab('annual')">💰 収支</button>
+      <button class="tab" onclick="switchTab('manual')">📖 使い方</button>
       <button class="tab" onclick="switchTab('settings')">⚙️ 設定</button>
     </div>
   </nav>
@@ -252,8 +336,39 @@
 
 <div class="content">
 
-  <!-- シフトタブ -->
-  <div id="tab-shifts" class="panel active">
+  <!-- ホーム -->
+  <div id="tab-home" class="panel active">
+    <div class="card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-size:22px;font-weight:700" id="today-date"></div>
+          <div style="font-size:13px;color:var(--text2);margin-top:2px" id="today-day"></div>
+        </div>
+        <div style="font-size:13px;color:var(--text2)" id="today-greeting"></div>
+      </div>
+      <div class="section-title">本日のシフト</div>
+      <div id="today-shifts"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin-bottom:0">カレンダー</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-sm" onclick="calPrevMonth()">‹</button>
+          <span id="cal-month-label" style="font-size:13px;font-weight:500;min-width:60px;text-align:center"></span>
+          <button class="btn btn-sm" onclick="calNextMonth()">›</button>
+        </div>
+      </div>
+      <div class="mini-cal-grid" id="cal-day-headers"></div>
+      <div class="mini-cal-grid" id="cal-grid"></div>
+    </div>
+    <div class="card">
+      <div class="section-title">今月のサマリー</div>
+      <div class="metrics" id="home-metrics"></div>
+    </div>
+  </div>
+
+  <!-- シフト -->
+  <div id="tab-shifts" class="panel">
     <div id="conflict-zone"></div>
     <div class="metrics">
       <div class="metric-card"><div class="label">通常コマ数</div><div class="value" id="m-koma-normal">0</div></div>
@@ -262,7 +377,7 @@
       <div class="metric-card"><div class="label">教材開発</div><div class="value" id="m-hours-dev">0h</div></div>
       <div class="metric-card"><div class="label">その他MTG</div><div class="value" id="m-hours-mtg">0h</div></div>
       <div class="metric-card"><div class="label">SNSマーケティング</div><div class="value" id="m-hours-sns">0h</div></div>
-      <div class="metric-card"><div class="label">概算報酬</div><div class="value" id="m-pay">¥0</div></div>
+      <div class="metric-card" style="grid-column:span 2"><div class="label">概算報酬</div><div class="value" id="m-pay">¥0</div></div>
     </div>
     <div class="card">
       <div class="section-title">シフトを追加</div>
@@ -286,11 +401,9 @@
       </div>
       <div class="form-group" style="margin-bottom:8px">
         <label>担当コース（任意）</label>
-        <input type="text" id="new-memo" placeholder="例: ジュニア / スタンダード / 研修資料作成">
+        <input type="text" id="new-memo" placeholder="例: ジュニア / スタンダード">
       </div>
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="addShift()">＋ 追加</button>
-      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="addShift()">＋ 追加</button></div>
       <div class="flash" id="add-msg"></div>
     </div>
     <div class="card">
@@ -306,7 +419,7 @@
     </div>
   </div>
 
-  <!-- 月別一括タブ -->
+  <!-- 一括登録 -->
   <div id="tab-bulk" class="panel">
     <div class="card">
       <div class="section-title">月別一括登録</div>
@@ -334,20 +447,17 @@
         <input type="text" id="bulk-memo" placeholder="例: ジュニア / スタンダード">
       </div>
       <div id="week-grid"></div>
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="executeBulk()">一括登録する</button>
-      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="executeBulk()">一括登録する</button></div>
       <div class="flash" id="bulk-msg"></div>
     </div>
   </div>
 
-  <!-- 請求書タブ -->
+  <!-- 請求書 -->
   <div id="tab-invoice" class="panel">
     <div class="card">
       <div class="section-title">請求書生成</div>
       <div class="form-group" style="max-width:200px;margin-bottom:12px">
-        <label>対象月</label>
-        <input type="month" id="inv-month">
+        <label>対象月</label><input type="month" id="inv-month">
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="generateInvoice()">生成</button>
@@ -360,10 +470,119 @@
     </div>
   </div>
 
-  <!-- 設定タブ -->
+  <!-- 年間収支 -->
+  <div id="tab-annual" class="panel">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin-bottom:0">年間収支</div>
+        <div class="year-nav">
+          <button class="btn btn-sm" onclick="changeYear(-1)">‹</button>
+          <span id="year-label"></span>
+          <button class="btn btn-sm" onclick="changeYear(1)">›</button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">※ 給与翌月25日払いのため、集計期間は前年12月〜当年11月の労働分です</p>
+      <div class="annual-summary">
+        <div class="annual-card"><div class="label">概算合計</div><div class="value" id="annual-calc">¥0</div></div>
+        <div class="annual-card"><div class="label">振込合計</div><div class="value" id="annual-paid">¥0</div></div>
+        <div class="annual-card"><div class="label">目標額</div><div class="value" id="annual-goal-disp">¥0</div></div>
+      </div>
+      <div style="margin-bottom:6px;font-size:12px;color:var(--text2);display:flex;justify-content:space-between">
+        <span>目標達成率</span><span id="annual-pct">0%</span>
+      </div>
+      <div class="progress-bar-wrap"><div class="progress-bar-fill" id="annual-bar" style="width:0%"></div></div>
+      <div style="margin-top:12px">
+        <div class="form-group"><label>年間目標額（円）</label><input type="number" id="annual-goal-input" placeholder="例: 1000000" onchange="saveGoal()"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">月別詳細</div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:8px">振込額 = その月の25日に振り込まれた金額（前月分の給与）</p>
+      <div style="display:grid;grid-template-columns:90px 1fr 120px;gap:0;font-size:11px;color:var(--text3);padding:0 0 6px 0;border-bottom:.5px solid var(--border);margin-bottom:4px">
+        <span>労働月</span><span>概算報酬</span><span style="text-align:right">振込額</span>
+      </div>
+      <div id="monthly-list"></div>
+    </div>
+  </div>
+
+  <!-- 使い方 -->
+  <div id="tab-manual" class="panel">
+    <div class="card">
+      <div class="section-title">使い方ガイド</div>
+      <div class="manual-section">
+        <h3>🏠 ホーム</h3>
+        <ul>
+          <li>本日のシフトと月間カレンダーが確認できます</li>
+          <li>シフトが登録されている日には●が表示されます</li>
+          <li>今月のコマ数・概算報酬がサマリーで確認できます</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>📅 シフト登録</h3>
+        <ul>
+          <li>業務種別・日付・開始〜終了時刻を入力して「＋追加」をタップ</li>
+          <li>担当コースを入力するとGoogleカレンダーのタイトルに反映されます（例：【通常】ジュニア）</li>
+          <li>講師外業務（研修・開発・MTG・SNS）は「編集」ボタンで後から時間・メモを変更できます</li>
+          <li>生徒が来なかった場合は「クローズ」ボタンを押すと、その他MTG 15分として自動計算されます</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>📋 月別一括登録</h3>
+        <ul>
+          <li>毎週同じ曜日の授業を月ごとにまとめて登録できます</li>
+          <li>第1〜5週の曜日を選択して「一括登録する」をタップ</li>
+          <li>5週目が存在しない月は自動的にスキップされます</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>📄 請求書生成</h3>
+        <ul>
+          <li>対象月を選んで「生成」をタップするとテキストが自動作成されます</li>
+          <li>「コピー」ボタンでクリップボードにコピーできます</li>
+          <li>通常クラスは請求書に載らず、キャンプ・講師外業務のみ表示されます</li>
+          <li>授業クローズはその他MTGとして自動的に含まれます</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>💰 年間収支</h3>
+        <ul>
+          <li>給与は翌月25日払いのため、集計期間は前年12月〜当年11月分の労働に対応します</li>
+          <li>各月の振込額を手動で入力してください</li>
+          <li>年間目標額を設定すると達成率がバーで表示されます</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>⚙️ 設定</h3>
+        <ul>
+          <li><strong>時給・コマ単価：</strong>各業務の単価を設定します。変更後は自動で保存されます</li>
+          <li><strong>期間別時給履歴：</strong>昇給があった場合、開始月と新しい単価を登録すると過去の月にも正しい金額が適用されます</li>
+          <li><strong>Googleアカウント連携：</strong>ログインするとカレンダー自動登録とデータ同期が有効になります。セキュリティのため1時間ごとに再ログインが必要です</li>
+          <li><strong>エクスポート：</strong>データをJSONファイルとして保存できます。機種変更時の引き継ぎに使用してください</li>
+        </ul>
+      </div>
+      <div class="divider"></div>
+      <div class="manual-section">
+        <h3>🗓 Googleカレンダー連携</h3>
+        <ul>
+          <li>設定タブから「Googleアカウントでログイン」を行うと連携が有効になります</li>
+          <li>シフト追加時に自動でGoogleカレンダーに予定が登録されます</li>
+          <li>授業は15分前、講師外業務は10分前に通知が届きます</li>
+          <li>シフト削除時はGoogleカレンダーからも自動削除されます</li>
+          <li>アクセストークンは1時間で失効します。失効後は再ログインしてください</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定 -->
   <div id="tab-settings" class="panel">
     <div class="card">
-      <div class="section-title">時給・コマ単価（円）</div>
+      <div class="section-title">時給・コマ単価（現在）</div>
       <div class="form-grid" style="margin-bottom:10px">
         <div class="form-group"><label>通常クラス（コマ単価）</label><input type="number" id="rate-normal" placeholder="例: 3000" onchange="saveRates()"></div>
         <div class="form-group"><label>キャンプクラス（コマ単価）</label><input type="number" id="rate-camp" placeholder="例: 3500" onchange="saveRates()"></div>
@@ -381,19 +600,48 @@
       <div class="form-grid">
         <div class="form-group"><label>授業クローズ（時給・15分固定）</label><input type="number" id="rate-close" onchange="saveRates()"></div>
       </div>
-      <p class="rate-note">授業クローズは15分（×0.25）で請求額を計算し、講師外業務として請求書に載ります。</p>
+      <p class="rate-note">授業クローズは15分（×0.25）で計算し、その他MTGとして請求書に載ります。</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title">期間別時給履歴</div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">昇給があった場合、開始月と単価を登録すると過去の請求書にも正しい時給が適用されます。</p>
+      <div id="rate-history-list"></div>
+      <div class="divider"></div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:8px">新しい期間を追加</p>
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label>開始月</label><input type="month" id="rh-from"></div>
+        <div class="form-group"><label>終了月（空白=現在以降）</label><input type="month" id="rh-to"></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label>通常クラス</label><input type="number" id="rh-normal"></div>
+        <div class="form-group"><label>キャンプクラス</label><input type="number" id="rh-camp"></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label>研修業務</label><input type="number" id="rh-training"></div>
+        <div class="form-group"><label>教材開発</label><input type="number" id="rh-dev"></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:8px">
+        <div class="form-group"><label>その他MTG</label><input type="number" id="rh-mtg"></div>
+        <div class="form-group"><label>SNSマーケティング</label><input type="number" id="rh-sns"></div>
+      </div>
+      <div class="form-grid" style="margin-bottom:10px">
+        <div class="form-group"><label>授業クローズ</label><input type="number" id="rh-close"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addRateHistory()">追加</button>
+      <div class="flash" id="rh-msg"></div>
     </div>
 
     <div class="card">
       <div class="section-title">Googleアカウント連携</div>
       <div class="auth-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、Googleカレンダーへの自動登録・複数端末でのデータ同期が有効になります。</p>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、Googleカレンダーへの自動登録・複数端末でのデータ同期が有効になります。セキュリティのため1時間ごとに再ログインが必要です。</p>
         <div id="auth-signin-area">
           <button class="btn btn-primary" onclick="googleSignIn()">🔗 Googleアカウントでログイン</button>
         </div>
         <div id="auth-signout-area" style="display:none">
           <div class="connected-box">✓ ログイン中: <strong id="auth-user-name" style="margin-left:4px"></strong></div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:8px">カレンダー連携・データ同期が有効です</p>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:8px">データ同期・カレンダー連携が有効です。</p>
           <button class="btn btn-sm" onclick="googleSignOut()">ログアウト</button>
         </div>
       </div>
@@ -419,422 +667,535 @@
 
 </div>
 
+<footer style="max-width:720px;margin:0 auto;padding:24px 16px;text-align:center;font-size:12px;color:var(--text3);border-top:.5px solid var(--border)">
+  <p style="margin-bottom:8px">ClassmallKids シフト・請求書管理 | りゅう先生</p>
+  <p>
+    <a href="/privacy.html" style="color:var(--text3);text-decoration:none;margin:0 8px">プライバシーポリシー</a>
+    <a href="/terms.html" style="color:var(--text3);text-decoration:none;margin:0 8px">利用規約</a>
+  </p>
+</footer>
+
 <script>
-const APP_VERSION = '2.0.0';
-document.getElementById('ver-badge').textContent  = 'v' + APP_VERSION;
-document.getElementById('ver-display').textContent = APP_VERSION;
+const APP_VERSION='3.1.0';
+document.getElementById('ver-badge').textContent='v'+APP_VERSION;
+document.getElementById('ver-display').textContent=APP_VERSION;
 
-const TYPE_LABEL   = {normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG',sns:'SNSマーケティング'};
-const TYPE_GCAL    = {normal:'【通常】',camp:'【キャンプ】',training:'【研修】',dev:'【開発】',mtg:'【MTG】',sns:'【SNS】'};
-const TYPE_COLOR   = {normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556',sns:'#0e7490'};
-const TYPE_INVOICE = {normal:false,camp:true,training:true,dev:true,mtg:true,sns:true};
-const TYPE_HOURLY  = {normal:false,camp:false,training:true,dev:true,mtg:true,sns:true};
-const DAYS_JA      = ['日','月','火','水','木','金','土'];
-const WEEK_LABELS  = ['第1週','第2週','第3週','第4週','第5週'];
+const TYPE_LABEL  ={normal:'通常クラス',camp:'キャンプクラス',training:'研修業務',dev:'教材開発',mtg:'その他MTG',sns:'SNSマーケティング'};
+const TYPE_GCAL   ={normal:'【通常】',camp:'【キャンプ】',training:'【研修】',dev:'【開発】',mtg:'【MTG】',sns:'【SNS】'};
+const TYPE_COLOR  ={normal:'#3B6D11',camp:'#185FA5',training:'#854F0B',dev:'#534AB7',mtg:'#993556',sns:'#0e7490'};
+const TYPE_INVOICE={normal:false,camp:true,training:true,dev:true,mtg:true,sns:true};
+const TYPE_HOURLY ={normal:false,camp:false,training:true,dev:true,mtg:true,sns:true};
+const DAYS_JA     =['日','月','火','水','木','金','土'];
+const WEEK_LABELS =['第1週','第2週','第3週','第4週','第5週'];
+const ALL_RATE_KEYS=['normal','camp','training','dev','mtg','sns','close'];
 
-let shifts    = [];
-let rates     = {normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};
-let viewMonth = new Date(); viewMonth.setDate(1);
+let shifts=[],rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};
+let rateHistory=[],payments={},annualGoals={};
+let viewMonth=new Date();viewMonth.setDate(1);
+let viewYear=new Date().getFullYear();
+let calMonth=new Date();calMonth.setDate(1);
+window._gcalToken=null;
 
-// Googleカレンダートークン
-window._gcalToken = null;
-window.onGcalConnected = function() {
-  // トークン取得済み、特に追加UI不要（設定タブで表示）
+// 再ログインモーダル
+window.showReloginModal=function(){document.getElementById('relogin-modal').classList.add('open');};
+function closeReloginModal(){document.getElementById('relogin-modal').classList.remove('open');}
+async function reloginAndClose(){closeReloginModal();await window.googleSignIn();}
+
+// Firebase受信
+window._fbShifts=null;window._fbRates=null;window._fbRateHistory=null;window._fbPayments=null;
+window.onFirebaseDataLoaded=function(){
+  if(window._fbShifts!==null)shifts=window._fbShifts;
+  if(window._fbRates!==null)rates={...rates,...window._fbRates};
+  if(window._fbRateHistory!==null)rateHistory=window._fbRateHistory;
+  if(window._fbPayments!==null){const d=window._fbPayments;payments=d.amounts||d;annualGoals=d.goals||annualGoals;}
+  saveLocal();
+  renderAll();
+  ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
+};
+window.onSignedOut=function(){
+  shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
+  renderAll();ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value='';});
+};
+window.onAccountChanged=function(){
+  shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
 };
 
-// Firebase データ受信
-window._fbShifts = null;
-window._fbRates  = null;
-window.onFirebaseDataLoaded = function() {
-  if (window._fbShifts !== null) shifts = window._fbShifts;
-  if (window._fbRates  !== null) rates  = {...rates, ...window._fbRates};
-  saveLocal();
-  renderShifts(); renderMetrics(); checkConflicts();
-  ['normal','camp','training','dev','mtg','sns','close'].forEach(k => {
-    const el = document.getElementById('rate-'+k); if (el) el.value = rates[k] || '';
-  });
-};
+function renderAll(){renderShifts();renderMetrics();checkConflicts();renderAnnual();renderRateHistory();renderHome();}
 
-function toLocalDateStr(dt) {
-  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-}
+function toLocalDateStr(dt){return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
+function toMonthStr(yr,mo){return`${yr}-${String(mo+1).padStart(2,'0')}`;}
 
-function loadLocal() {
-  try {
-    const s = localStorage.getItem('shifts_v3'); if (s) shifts = JSON.parse(s);
-    const r = localStorage.getItem('rates_v2');  if (r) rates  = {...rates, ...JSON.parse(r)};
-    const t = localStorage.getItem('gcal_token');if (t) window._gcalToken = t;
-  } catch(e) {}
+// Storage
+function loadLocal(){
+  try{
+    const s=localStorage.getItem('shifts_v3');if(s)shifts=JSON.parse(s);
+    const r=localStorage.getItem('rates_v2');if(r)rates={...rates,...JSON.parse(r)};
+    const rh=localStorage.getItem('rate_history');if(rh)rateHistory=JSON.parse(rh);
+    const p=localStorage.getItem('payments_v1');if(p){const d=JSON.parse(p);payments=d.amounts||d;annualGoals=d.goals||{};}
+    const t=localStorage.getItem('gcal_token');if(t)window._gcalToken=t;
+  }catch(e){}
 }
-function saveLocal() {
-  try { localStorage.setItem('shifts_v3', JSON.stringify(shifts)); } catch(e) {}
+function saveLocal(){
+  try{
+    localStorage.setItem('shifts_v3',JSON.stringify(shifts));
+    localStorage.setItem('rate_history',JSON.stringify(rateHistory));
+    localStorage.setItem('payments_v1',JSON.stringify({amounts:payments,goals:annualGoals}));
+  }catch(e){}
 }
-function save() {
+function save(){
   saveLocal();
-  if (typeof window.saveToFirebase === 'function') window.saveToFirebase(shifts, rates);
+  if(typeof window.saveToFirebase==='function')window.saveToFirebase(shifts,rates,rateHistory,{amounts:payments,goals:annualGoals});
 }
-function saveRates() {
-  ['normal','camp','training','dev','mtg','sns','close'].forEach(k => {
-    const el = document.getElementById('rate-'+k); if (el) rates[k] = parseFloat(el.value)||0;
-  });
-  try { localStorage.setItem('rates_v2', JSON.stringify(rates)); } catch(e) {}
-  if (typeof window.saveToFirebase === 'function') window.saveToFirebase(shifts, rates);
+function saveRates(){
+  ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)rates[k]=parseFloat(el.value)||0;});
+  try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(e){}
+  if(typeof window.saveToFirebase==='function')window.saveToFirebase(shifts,rates,rateHistory,{amounts:payments,goals:annualGoals});
   renderMetrics();
 }
 
-function switchTab(t) {
-  const ids = ['shifts','bulk','invoice','settings'];
-  document.querySelectorAll('.tab').forEach((b,i) => b.classList.toggle('active', ids[i]===t));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+function getRatesForMonth(yrmo){
+  if(!rateHistory.length)return rates;
+  const applicable=rateHistory.filter(h=>h.from<=yrmo&&(!h.to||h.to>=yrmo)).sort((a,b)=>b.from.localeCompare(a.from));
+  return applicable.length?{...rates,...applicable[0].rates}:rates;
+}
+
+function switchTab(t){
+  const ids=['home','shifts','bulk','invoice','annual','manual','settings'];
+  document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',ids[i]===t));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
-  if (t==='invoice') { const n=new Date(); document.getElementById('inv-month').value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0'); }
-  if (t==='bulk') buildWeekGrid();
+  if(t==='invoice'){const n=new Date();document.getElementById('inv-month').value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');}
+  if(t==='bulk')buildWeekGrid();
+  if(t==='annual')renderAnnual();
+  if(t==='home')renderHome();
 }
 
-function showFlash(id, txt, ok) {
-  const el = document.getElementById(id);
-  el.textContent = txt; el.className = 'flash ' + (ok?'ok':'err');
-  setTimeout(() => { el.className='flash'; }, 3500);
+function showFlash(id,txt,ok){
+  const el=document.getElementById(id);
+  el.textContent=txt;el.className='flash '+(ok?'ok':'err');
+  setTimeout(()=>{el.className='flash';},3500);
 }
 
-function addShift() {
-  const type  = document.getElementById('new-type').value;
-  const date  = document.getElementById('new-date').value;
-  const start = document.getElementById('new-start').value;
-  const end   = document.getElementById('new-end').value;
-  const memo  = document.getElementById('new-memo').value;
-  if (!date||!start||!end) { showFlash('add-msg','日付・時刻を入力してください',false); return; }
-  if (start>=end) { showFlash('add-msg','終了時刻は開始より後にしてください',false); return; }
-  const shift = {id:Date.now()+Math.random(), type, date, start, end, memo, closed:false, gcalEventId:null};
-  shifts.push(shift);
-  save(); checkConflicts(); renderShifts(); renderMetrics();
-  showFlash('add-msg','追加しました',true);
-  if (window._gcalToken) syncToGcal(shift);
-}
+// ホーム
+function renderHome(){
+  const now=new Date();
+  const todayStr=toLocalDateStr(now);
+  const days=['日曜日','月曜日','火曜日','水曜日','木曜日','金曜日','土曜日'];
+  const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  document.getElementById('today-date').textContent=`${now.getFullYear()}年${months[now.getMonth()]}${now.getDate()}日`;
+  document.getElementById('today-day').textContent=days[now.getDay()];
+  const h=now.getHours();
+  document.getElementById('today-greeting').textContent=h<12?'おはようございます！':h<18?'お疲れ様です！':'お疲れ様でした！';
 
-function toggleClose(id) {
-  const s = shifts.find(x => x.id===id); if (!s) return;
-  s.closed = !s.closed;
-  save(); renderShifts(); renderMetrics();
-}
-
-function deleteShift(id) {
-  if (!confirm('このシフトを削除しますか？')) return;
-  const s = shifts.find(x => x.id===id);
-  if (s && s.gcalEventId) deleteFromGcal(s.gcalEventId);
-  shifts = shifts.filter(x => x.id!==id);
-  save(); checkConflicts(); renderShifts(); renderMetrics();
-}
-
-function durationH(s, e) {
-  const [sh,sm] = s.split(':').map(Number);
-  const [eh,em] = e.split(':').map(Number);
-  return ((eh*60+em)-(sh*60+sm))/60;
-}
-
-function getConflictIds() {
-  const sorted = [...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
-  const ids = new Set();
-  for (let i=0;i<sorted.length-1;i++) {
-    const a=sorted[i], b=sorted[i+1];
-    if (a.date===b.date && a.end>b.start) { ids.add(a.id); ids.add(b.id); }
+  const todayShifts=shifts.filter(s=>s.date===todayStr&&!s.closed).sort((a,b)=>a.start<b.start?-1:1);
+  const tsEl=document.getElementById('today-shifts');
+  if(!todayShifts.length){
+    tsEl.innerHTML='<div class="no-shift">本日のシフトはありません</div>';
+  }else{
+    tsEl.innerHTML=todayShifts.map(s=>`
+      <div class="today-shift-item">
+        <div style="width:8px;height:8px;border-radius:50%;background:${TYPE_COLOR[s.type]};flex-shrink:0"></div>
+        <div style="font-size:15px;font-weight:600;min-width:90px">${s.start}〜${s.end}</div>
+        <div style="font-size:13px;color:var(--text2)">${TYPE_LABEL[s.type]}${s.memo?'・'+s.memo:''}</div>
+      </div>`).join('');
   }
+
+  const yr=now.getFullYear(),mo=now.getMonth();
+  const yrmo=toMonthStr(yr,mo);
+  const r=getRatesForMonth(yrmo);
+  const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
+  let koma=0,pay=0;
+  list.forEach(s=>{
+    if(s.closed){pay+=(r.close||0)*0.25;}
+    else if(s.type==='normal'){koma++;pay+=(r.normal||0);}
+    else if(s.type==='camp'){koma++;pay+=(r.camp||0);}
+    else if(TYPE_HOURLY[s.type]){pay+=durationH(s.start,s.end)*(r[s.type]||0);}
+  });
+  document.getElementById('home-metrics').innerHTML=`
+    <div class="metric-card"><div class="label">今月のコマ数</div><div class="value">${koma}コマ</div></div>
+    <div class="metric-card"><div class="label">今月の概算報酬</div><div class="value">¥${Math.round(pay).toLocaleString()}</div></div>`;
+  renderMiniCal();
+}
+
+function renderMiniCal(){
+  const yr=calMonth.getFullYear(),mo=calMonth.getMonth();
+  document.getElementById('cal-month-label').textContent=`${yr}年${mo+1}月`;
+  document.getElementById('cal-day-headers').innerHTML=DAYS_JA.map((d,i)=>`<div class="mini-cal-day-header" style="${i===0?'color:var(--danger-text)':i===6?'color:#2563eb':''}">${d}</div>`).join('');
+  const firstDay=new Date(yr,mo,1).getDay();
+  const lastDate=new Date(yr,mo+1,0).getDate();
+  const todayStr=toLocalDateStr(new Date());
+  const shiftDates=new Set(shifts.map(s=>s.date));
+  let cells='';
+  for(let i=0;i<firstDay;i++){const pd=new Date(yr,mo,-(firstDay-i-1));cells+=`<div class="mini-cal-day other-month">${pd.getDate()}</div>`;}
+  for(let d=1;d<=lastDate;d++){
+    const dateStr=`${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow=new Date(yr,mo,d).getDay();
+    const cls=['mini-cal-day',dateStr===todayStr?'today':'',shiftDates.has(dateStr)?'has-shift':'',dow===0?'sun':dow===6?'sat':''].filter(Boolean).join(' ');
+    cells+=`<div class="${cls}">${d}</div>`;
+  }
+  document.getElementById('cal-grid').innerHTML=cells;
+}
+function calPrevMonth(){calMonth.setMonth(calMonth.getMonth()-1);renderMiniCal();}
+function calNextMonth(){calMonth.setMonth(calMonth.getMonth()+1);renderMiniCal();}
+
+function addShift(){
+  const type=document.getElementById('new-type').value;
+  const date=document.getElementById('new-date').value;
+  const start=document.getElementById('new-start').value;
+  const end=document.getElementById('new-end').value;
+  const memo=document.getElementById('new-memo').value;
+  if(!date||!start||!end){showFlash('add-msg','日付・時刻を入力してください',false);return;}
+  if(start>=end){showFlash('add-msg','終了時刻は開始より後にしてください',false);return;}
+  const shift={id:Date.now()+Math.random(),type,date,start,end,memo,closed:false,gcalEventId:null};
+  shifts.push(shift);
+  save();checkConflicts();renderShifts();renderMetrics();renderHome();
+  showFlash('add-msg','追加しました',true);
+  if(window._gcalToken)syncToGcal(shift);
+}
+
+function openEditModal(id){
+  const s=shifts.find(x=>x.id===id);if(!s)return;
+  document.getElementById('edit-shift-id').value=id;
+  document.getElementById('edit-start').value=s.start;
+  document.getElementById('edit-end').value=s.end;
+  document.getElementById('edit-memo').value=s.memo||'';
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeEditModal(){document.getElementById('edit-modal').classList.remove('open');}
+function saveEdit(){
+  const id=parseFloat(document.getElementById('edit-shift-id').value);
+  const s=shifts.find(x=>x.id===id);if(!s)return;
+  const newStart=document.getElementById('edit-start').value;
+  const newEnd=document.getElementById('edit-end').value;
+  const newMemo=document.getElementById('edit-memo').value;
+  if(!newStart||!newEnd){alert('時刻を入力してください');return;}
+  if(newStart>=newEnd){alert('終了時刻は開始より後にしてください');return;}
+  const oldGcalId=s.gcalEventId;
+  s.start=newStart;s.end=newEnd;s.memo=newMemo;s.gcalEventId=null;
+  if(window._gcalToken&&oldGcalId){deleteFromGcal(oldGcalId);syncToGcal(s);}
+  save();renderShifts();renderMetrics();renderHome();closeEditModal();
+}
+
+function toggleClose(id){
+  const s=shifts.find(x=>x.id===id);if(!s)return;
+  s.closed=!s.closed;
+  save();renderShifts();renderMetrics();renderHome();
+}
+
+function deleteShift(id){
+  if(!confirm('このシフトを削除しますか？'))return;
+  const s=shifts.find(x=>x.id===id);
+  if(s&&s.gcalEventId)deleteFromGcal(s.gcalEventId);
+  shifts=shifts.filter(x=>x.id!==id);
+  save();checkConflicts();renderShifts();renderMetrics();renderHome();
+}
+
+function durationH(s,e){
+  const[sh,sm]=s.split(':').map(Number);
+  const[eh,em]=e.split(':').map(Number);
+  return((eh*60+em)-(sh*60+sm))/60;
+}
+
+function getConflictIds(){
+  const sorted=[...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
+  const ids=new Set();
+  for(let i=0;i<sorted.length-1;i++){const a=sorted[i],b=sorted[i+1];if(a.date===b.date&&a.end>b.start){ids.add(a.id);ids.add(b.id);}}
   return ids;
 }
 
-function renderShifts() {
-  const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
-  document.getElementById('month-label').textContent = yr+'年'+(mo+1)+'月';
-  const conflictIds = getConflictIds();
-  const list = shifts
-    .filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; })
-    .sort((a,b) => (a.date+a.start)<(b.date+b.start)?-1:1);
-  const el = document.getElementById('shift-list');
-  if (!list.length) { el.innerHTML='<p style="font-size:13px;color:var(--text2)">この月のシフトはありません</p>'; return; }
-  el.innerHTML = list.map(s => {
-    const h = durationH(s.start, s.end);
-    const isClass    = s.type==='normal'||s.type==='camp';
-    const isConflict = conflictIds.has(s.id);
-    let sub = TYPE_HOURLY[s.type]
-      ? `${s.start}〜${s.end}（${h.toFixed(1)}h）${s.memo?'・'+s.memo:''}`
-      : `${s.start}〜${s.end}（1コマ）${s.memo?'・'+s.memo:''}`;
-    if (s.closed) sub += ` → クローズ（15分 ¥${Math.round((rates.close||0)*0.25).toLocaleString()}）`;
-    const closedBadge   = s.closed     ? '<span class="closed-badge">クローズ</span>' : '';
-    const gcalBadge     = s.gcalEventId? '<span class="gcal-badge">📅</span>' : '';
-    const conflictBadge = isConflict   ? '<span class="conflict-badge">⚠ 重複</span>' : '';
-    const closeBtn = isClass
-      ? `<button class="btn ${s.closed?'btn-reopen':'btn-warn'}" onclick="toggleClose(${s.id})">${s.closed?'解除':'クローズ'}</button>`
-      : '';
-    return `<div class="shift-item${isConflict?' has-conflict':''}">
+function renderShifts(){
+  const yr=viewMonth.getFullYear(),mo=viewMonth.getMonth();
+  document.getElementById('month-label').textContent=yr+'年'+(mo+1)+'月';
+  const conflictIds=getConflictIds();
+  const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;}).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
+  const el=document.getElementById('shift-list');
+  if(!list.length){el.innerHTML='<p style="font-size:13px;color:var(--text2)">この月のシフトはありません</p>';return;}
+  el.innerHTML=list.map(s=>{
+    const h=durationH(s.start,s.end);
+    const isClass=s.type==='normal'||s.type==='camp';
+    const isHourly=TYPE_HOURLY[s.type];
+    let sub=isHourly?`${s.start}〜${s.end}（${h.toFixed(1)}h）${s.memo?'・'+s.memo:''}`:`${s.start}〜${s.end}（1コマ）${s.memo?'・'+s.memo:''}`;
+    if(s.closed)sub+=` → クローズ（15分 ¥${Math.round((rates.close||0)*0.25).toLocaleString()}）`;
+    const isConflict=conflictIds.has(s.id);
+    const closedBadge=s.closed?'<span class="closed-badge">クローズ</span>':'';
+    const gcalBadge=s.gcalEventId?'<span class="gcal-badge">📅</span>':'';
+    const conflictBadge=isConflict?'<span class="conflict-badge">⚠ 重複</span>':'';
+    const closeBtn=isClass?`<button class="btn ${s.closed?'btn-reopen':'btn-warn'}" onclick="toggleClose(${s.id})">${s.closed?'解除':'クローズ'}</button>`:'';
+    const editBtn=isHourly?`<button class="btn btn-edit" onclick="openEditModal(${s.id})">編集</button>`:'';
+    return`<div class="shift-item${isConflict?' has-conflict':''}">
       <div class="shift-dot" style="background:${s.closed?'#888':TYPE_COLOR[s.type]}"></div>
       <div class="shift-body">
         <div class="shift-title">${s.date.slice(5).replace('-','/')} ${TYPE_LABEL[s.type]} ${closedBadge}${gcalBadge}${conflictBadge}</div>
         <div class="shift-sub">${sub}</div>
       </div>
-      <div class="shift-actions">
-        ${closeBtn}
-        <button class="btn btn-sm btn-danger" onclick="deleteShift(${s.id})">削除</button>
-      </div>
+      <div class="shift-actions">${editBtn}${closeBtn}<button class="btn btn-sm btn-danger" onclick="deleteShift(${s.id})">削除</button></div>
     </div>`;
   }).join('');
 }
 
-function changeMonth(d) { viewMonth.setMonth(viewMonth.getMonth()+d); renderShifts(); renderMetrics(); }
+function changeMonth(d){viewMonth.setMonth(viewMonth.getMonth()+d);renderShifts();renderMetrics();}
 
-function renderMetrics() {
-  const yr = viewMonth.getFullYear(), mo = viewMonth.getMonth();
-  const list = shifts.filter(s => { const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()===mo; });
-  let komaNomal=0, komaCamp=0, hTraining=0, hDev=0, hMtg=0, hSns=0, pay=0;
-  list.forEach(s => {
-    if (s.closed) {
-      hMtg += 0.25;
-      pay += (rates.close||0)*0.25;
-    } else if (s.type==='normal') {
-      komaNomal++; pay += (rates.normal||0);
-    } else if (s.type==='camp') {
-      komaCamp++; pay += (rates.camp||0);
-    } else if (s.type==='training') {
-      const h=durationH(s.start,s.end); hTraining+=h; pay+=h*(rates.training||0);
-    } else if (s.type==='dev') {
-      const h=durationH(s.start,s.end); hDev+=h; pay+=h*(rates.dev||0);
-    } else if (s.type==='mtg') {
-      const h=durationH(s.start,s.end); hMtg+=h; pay+=h*(rates.mtg||0);
-    } else if (s.type==='sns') {
-      const h=durationH(s.start,s.end); hSns+=h; pay+=h*(rates.sns||0);
-    }
+function renderMetrics(){
+  const yr=viewMonth.getFullYear(),mo=viewMonth.getMonth();
+  const yrmo=toMonthStr(yr,mo);
+  const r=getRatesForMonth(yrmo);
+  const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
+  let komaNomal=0,komaCamp=0,hTraining=0,hDev=0,hMtg=0,hSns=0,pay=0;
+  list.forEach(s=>{
+    if(s.closed){hMtg+=0.25;pay+=(r.close||0)*0.25;}
+    else if(s.type==='normal'){komaNomal++;pay+=(r.normal||0);}
+    else if(s.type==='camp'){komaCamp++;pay+=(r.camp||0);}
+    else if(s.type==='training'){const h=durationH(s.start,s.end);hTraining+=h;pay+=h*(r.training||0);}
+    else if(s.type==='dev'){const h=durationH(s.start,s.end);hDev+=h;pay+=h*(r.dev||0);}
+    else if(s.type==='mtg'){const h=durationH(s.start,s.end);hMtg+=h;pay+=h*(r.mtg||0);}
+    else if(s.type==='sns'){const h=durationH(s.start,s.end);hSns+=h;pay+=h*(r.sns||0);}
   });
-  document.getElementById('m-koma-normal').textContent = komaNomal+'コマ';
-  document.getElementById('m-koma-camp').textContent = komaCamp+'コマ';
-  document.getElementById('m-hours-training').textContent = hTraining.toFixed(2)+'h';
-  document.getElementById('m-hours-dev').textContent = hDev.toFixed(2)+'h';
-  document.getElementById('m-hours-mtg').textContent = hMtg.toFixed(2)+'h';
-  document.getElementById('m-hours-sns').textContent = hSns.toFixed(2)+'h';
-  document.getElementById('m-pay').textContent = '¥'+Math.round(pay).toLocaleString();
+  document.getElementById('m-koma-normal').textContent=komaNomal+'コマ';
+  document.getElementById('m-koma-camp').textContent=komaCamp+'コマ';
+  document.getElementById('m-hours-training').textContent=hTraining.toFixed(2)+'h';
+  document.getElementById('m-hours-dev').textContent=hDev.toFixed(2)+'h';
+  document.getElementById('m-hours-mtg').textContent=hMtg.toFixed(2)+'h';
+  document.getElementById('m-hours-sns').textContent=hSns.toFixed(2)+'h';
+  document.getElementById('m-pay').textContent='¥'+Math.round(pay).toLocaleString();
 }
 
-function checkConflicts() {
-  const sorted = [...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
-  const conflicts = [];
-  for (let i=0;i<sorted.length-1;i++) {
-    const a=sorted[i], b=sorted[i+1];
-    if (a.date===b.date && a.end>b.start)
-      conflicts.push(`${a.date.slice(5).replace('-','/')} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);
-  }
-  document.getElementById('conflict-zone').innerHTML = conflicts.length
-    ? `<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`
-    : '';
+function checkConflicts(){
+  const sorted=[...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
+  const conflicts=[];
+  for(let i=0;i<sorted.length-1;i++){const a=sorted[i],b=sorted[i+1];if(a.date===b.date&&a.end>b.start)conflicts.push(`${a.date.slice(5).replace('-','/')} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);}
+  document.getElementById('conflict-zone').innerHTML=conflicts.length?`<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`:'';
 }
 
-function getNthWeekday(yr, mo, week, day) {
-  let d=new Date(yr,mo,1), count=0;
-  while (d.getMonth()===mo) {
-    if (d.getDay()===day) { if (count===week) return new Date(d); count++; }
-    d.setDate(d.getDate()+1);
-  }
+function getNthWeekday(yr,mo,week,day){
+  let d=new Date(yr,mo,1),count=0;
+  while(d.getMonth()===mo){if(d.getDay()===day){if(count===week)return new Date(d);count++;}d.setDate(d.getDate()+1);}
   return null;
 }
-
-function buildWeekGrid() {
-  const mv = document.getElementById('bulk-month').value;
-  const grid = document.getElementById('week-grid');
-  if (!mv) { grid.innerHTML='<p style="font-size:13px;color:var(--text2)">年月を選択してください</p>'; return; }
-  const [yr,mo] = mv.split('-').map(Number);
-  grid.innerHTML = '';
-  for (let w=0;w<5;w++) {
-    const block = document.createElement('div'); block.className='week-block';
-    const hdr   = document.createElement('div'); hdr.className='week-header';
-    hdr.innerHTML = `<span>${WEEK_LABELS[w]}</span><span>▾</span>`;
-    const body  = document.createElement('div'); body.className='week-body';
-    const row   = document.createElement('div'); row.className='day-row';
-    let anyExists = false;
-    for (let dayIdx=0; dayIdx<7; dayIdx++) {
-      const dt  = getNthWeekday(yr, mo-1, w, dayIdx);
-      const btn = document.createElement('button'); btn.className='day-btn';
-      btn.textContent = DAYS_JA[dayIdx];
-      if (!dt) { btn.disabled=true; }
-      else {
-        btn.title = `${mo}/${dt.getDate()}`;
-        btn.dataset.week = w; btn.dataset.day = dayIdx;
-        btn.onclick = function(){ this.classList.toggle('on'); };
-        anyExists = true;
-      }
+function buildWeekGrid(){
+  const mv=document.getElementById('bulk-month').value;
+  const grid=document.getElementById('week-grid');
+  if(!mv){grid.innerHTML='<p style="font-size:13px;color:var(--text2)">年月を選択してください</p>';return;}
+  const[yr,mo]=mv.split('-').map(Number);
+  grid.innerHTML='';
+  for(let w=0;w<5;w++){
+    const block=document.createElement('div');block.className='week-block';
+    const hdr=document.createElement('div');hdr.className='week-header';
+    hdr.innerHTML=`<span>${WEEK_LABELS[w]}</span><span>▾</span>`;
+    const body=document.createElement('div');body.className='week-body';
+    const row=document.createElement('div');row.className='day-row';
+    let anyExists=false;
+    for(let dayIdx=0;dayIdx<7;dayIdx++){
+      const dt=getNthWeekday(yr,mo-1,w,dayIdx);
+      const btn=document.createElement('button');btn.className='day-btn';
+      btn.textContent=DAYS_JA[dayIdx];
+      if(!dt){btn.disabled=true;}
+      else{btn.title=`${mo}/${dt.getDate()}`;btn.dataset.week=w;btn.dataset.day=dayIdx;btn.onclick=function(){this.classList.toggle('on');};anyExists=true;}
       row.appendChild(btn);
     }
-    if (!anyExists) {
-      const note = document.createElement('p');
-      note.style.cssText = 'font-size:12px;color:var(--text3)';
-      note.textContent = 'この週は存在しません';
-      row.appendChild(note);
-    }
-    body.appendChild(row);
-    hdr.onclick = () => body.classList.toggle('open');
-    block.appendChild(hdr); block.appendChild(body); grid.appendChild(block);
+    if(!anyExists){const note=document.createElement('p');note.style.cssText='font-size:12px;color:var(--text3)';note.textContent='この週は存在しません';row.appendChild(note);}
+    body.appendChild(row);hdr.onclick=()=>body.classList.toggle('open');
+    block.appendChild(hdr);block.appendChild(body);grid.appendChild(block);
   }
 }
-
-function executeBulk() {
-  const mv    = document.getElementById('bulk-month').value;
-  const type  = document.getElementById('bulk-type').value;
-  const start = document.getElementById('bulk-start').value;
-  const end   = document.getElementById('bulk-end').value;
-  const memo  = document.getElementById('bulk-memo').value;
-  if (!mv||!start||!end) { showFlash('bulk-msg','年月・時刻を入力してください',false); return; }
-  if (start>=end) { showFlash('bulk-msg','終了時刻は開始より後にしてください',false); return; }
-  const [yr,mo] = mv.split('-').map(Number);
-  const sel = document.querySelectorAll('#week-grid .day-btn.on');
-  if (!sel.length) { showFlash('bulk-msg','曜日を選択してください',false); return; }
-  let count = 0;
-  sel.forEach(btn => {
-    const dt = getNthWeekday(yr, mo-1, parseInt(btn.dataset.week), parseInt(btn.dataset.day));
-    if (dt) {
-      const shift = {id:Date.now()+Math.random(), type, date:toLocalDateStr(dt), start, end, memo, closed:false, gcalEventId:null};
-      shifts.push(shift);
-      count++;
-      if (window._gcalToken) syncToGcal(shift);
-    }
+function executeBulk(){
+  const mv=document.getElementById('bulk-month').value;
+  const type=document.getElementById('bulk-type').value;
+  const start=document.getElementById('bulk-start').value;
+  const end=document.getElementById('bulk-end').value;
+  const memo=document.getElementById('bulk-memo').value;
+  if(!mv||!start||!end){showFlash('bulk-msg','年月・時刻を入力してください',false);return;}
+  if(start>=end){showFlash('bulk-msg','終了時刻は開始より後にしてください',false);return;}
+  const[yr,mo]=mv.split('-').map(Number);
+  const sel=document.querySelectorAll('#week-grid .day-btn.on');
+  if(!sel.length){showFlash('bulk-msg','曜日を選択してください',false);return;}
+  let count=0;
+  sel.forEach(btn=>{
+    const dt=getNthWeekday(yr,mo-1,parseInt(btn.dataset.week),parseInt(btn.dataset.day));
+    if(dt){const shift={id:Date.now()+Math.random(),type,date:toLocalDateStr(dt),start,end,memo,closed:false,gcalEventId:null};shifts.push(shift);count++;if(window._gcalToken)syncToGcal(shift);}
   });
-  save(); checkConflicts(); renderShifts(); renderMetrics();
-  showFlash('bulk-msg', count+'件を登録しました（存在しない週は自動スキップ）', true);
+  save();checkConflicts();renderShifts();renderMetrics();renderHome();
+  showFlash('bulk-msg',count+'件を登録しました（存在しない週は自動スキップ）',true);
   document.querySelectorAll('#week-grid .day-btn.on').forEach(b=>b.classList.remove('on'));
 }
 
-function generateInvoice() {
-  const mv = document.getElementById('inv-month').value; if (!mv) return;
-  const [yr,mo] = mv.split('-').map(Number);
-  const inMonth = shifts
-    .filter(s=>{ const d=new Date(s.date); return d.getFullYear()===yr&&d.getMonth()+1===mo; })
-    .sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
-  const campShifts   = inMonth.filter(s=>s.type==='camp'&&!s.closed);
-  const outerShifts  = inMonth.filter(s=>TYPE_INVOICE[s.type]&&s.type!=='camp'&&!s.closed);
-  const closedShifts = inMonth.filter(s=>(s.type==='normal'||s.type==='camp')&&s.closed);
-  let lines = [];
-  if (campShifts.length) {
+function calcMonthPay(yr,mo){
+  const yrmo=toMonthStr(yr,mo);
+  const r=getRatesForMonth(yrmo);
+  const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
+  let pay=0;
+  list.forEach(s=>{
+    if(s.closed){pay+=(r.close||0)*0.25;}
+    else if(s.type==='normal'){pay+=(r.normal||0);}
+    else if(s.type==='camp'){pay+=(r.camp||0);}
+    else if(TYPE_HOURLY[s.type]){pay+=durationH(s.start,s.end)*(r[s.type]||0);}
+  });
+  return Math.round(pay);
+}
+
+function generateInvoice(){
+  const mv=document.getElementById('inv-month').value;if(!mv)return;
+  const[yr,mo]=mv.split('-').map(Number);
+  const sortFn=(a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1;
+  const inMonth=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()+1===mo;}).sort(sortFn);
+  const campShifts   =inMonth.filter(s=>s.type==='camp'&&!s.closed);
+  const trainingShifts=inMonth.filter(s=>s.type==='training'&&!s.closed);
+  const devShifts    =inMonth.filter(s=>s.type==='dev'&&!s.closed);
+  const snsShifts    =inMonth.filter(s=>s.type==='sns'&&!s.closed);
+  const mtgShifts    =inMonth.filter(s=>s.type==='mtg'&&!s.closed);
+  const closedShifts =inMonth.filter(s=>(s.type==='normal'||s.type==='camp')&&s.closed);
+  let lines=[];
+  if(campShifts.length){
     lines.push('講師業務キャンプ');
-    campShifts.forEach(s=>{ const d=new Date(s.date); lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}`); });
+    campShifts.forEach(s=>{const d=new Date(s.date);lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}`);});
     lines.push('');
   }
-  if (outerShifts.length||closedShifts.length) {
+  const hasOuter=trainingShifts.length||devShifts.length||snsShifts.length||mtgShifts.length||closedShifts.length;
+  if(hasOuter){
     lines.push('講師外業務');
-    // 研修業務
-    outerShifts.filter(s=>s.type==='training').forEach(s=>{
-      const d = new Date(s.date);
-      const memo = s.memo ? ' ' + s.memo : '';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (研修業務${memo})`);
-    });
-    // 教材開発
-    outerShifts.filter(s=>s.type==='dev').forEach(s=>{
-      const d = new Date(s.date);
-      const memo = s.memo ? ' ' + s.memo : '';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (教材開発${memo})`);
-    });
-    // SNSマーケティング
-    outerShifts.filter(s=>s.type==='sns').forEach(s=>{
-      const d = new Date(s.date);
-      const memo = s.memo ? ' ' + s.memo : '';
-      lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (SNSマーケティング${memo})`);
-    });
-    // その他MTG（授業クローズ分を合算）
-    const mtgShifts = outerShifts.filter(s=>s.type==='mtg');
-    const closedH = closedShifts.length * 0.25;
-    if (mtgShifts.length || closedShifts.length) {
-      mtgShifts.forEach(s=>{
-        const d = new Date(s.date);
-        const memo = s.memo ? ' ' + s.memo : '';
-        lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (その他MTG${memo})`);
-      });
-      closedShifts.forEach(s=>{
-        const d = new Date(s.date);
-        lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (その他MTG 授業クローズ 15分)`);
-      });
-    }
+    trainingShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (研修業務${memo})`);});
+    devShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (教材開発${memo})`);});
+    snsShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (SNSマーケティング${memo})`);});
+    mtgShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}-${s.end} (その他MTG${memo})`);});
+    closedShifts.forEach(s=>{const d=new Date(s.date);lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start} (その他MTG 授業クローズ 15分)`);});
   }
-  if (!lines.length) lines=['（この月の対象シフトはありません）'];
-  document.getElementById('invoice-out').textContent = lines.join('\n');
+  if(!lines.length)lines=['（この月の対象シフトはありません）'];
+  document.getElementById('invoice-out').textContent=lines.join('\n');
+}
+function copyInvoice(){navigator.clipboard.writeText(document.getElementById('invoice-out').textContent).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));}
+
+// 年間収支（前年12月〜当年11月）
+function changeYear(d){viewYear+=d;renderAnnual();}
+function saveGoal(){annualGoals[viewYear]=parseInt(document.getElementById('annual-goal-input').value)||0;save();renderAnnual();}
+function savePayment(yrmo,val){payments[yrmo]=parseInt(val)||0;save();renderAnnual();}
+
+function renderAnnual(){
+  document.getElementById('year-label').textContent=viewYear+'年';
+  const goal=annualGoals[viewYear]||0;
+  document.getElementById('annual-goal-input').value=goal||'';
+  document.getElementById('annual-goal-disp').textContent='¥'+goal.toLocaleString();
+  let totalCalc=0,totalPaid=0;
+  const rows=[];
+  for(let i=0;i<12;i++){
+    // 労働月：i=0→前年12月、i=1→当年1月、...i=11→当年11月
+    const workYr=i===0?viewYear-1:viewYear;
+    const workMo=i===0?11:i-1;
+    // 振込月：i=0→当年1月25日、...i=11→当年12月25日
+    const payYr=viewYear;
+    const payMoNum=i+1; // 1〜12
+    const payYrmo=`${payYr}-${String(payMoNum).padStart(2,'0')}`;
+    const calc=calcMonthPay(workYr,workMo);
+    const paid=payments[payYrmo]||0;
+    totalCalc+=calc;totalPaid+=paid;
+    const workLabel=i===0?`${viewYear-1}年12月分`:`${viewYear}年${i}月分`;
+    const payLabel=`${payYr}/${String(payMoNum).padStart(2,'0')}/25振込`;
+    rows.push({workLabel,payLabel,payYrmo,calc,paid});
+  }
+  document.getElementById('annual-calc').textContent='¥'+totalCalc.toLocaleString();
+  document.getElementById('annual-paid').textContent='¥'+totalPaid.toLocaleString();
+  const pct=goal>0?Math.min(100,Math.round(totalPaid/goal*100)):0;
+  document.getElementById('annual-pct').textContent=pct+'%';
+  document.getElementById('annual-bar').style.width=pct+'%';
+  document.getElementById('monthly-list').innerHTML=rows.map(r=>`
+    <div class="monthly-row">
+      <span style="width:90px;font-size:11px;color:var(--text2);flex-shrink:0">${r.workLabel}</span>
+      <span style="flex:1;font-size:12px;color:var(--text2)">¥${r.calc.toLocaleString()}<br><span style="font-size:10px;color:var(--text3)">${r.payLabel}</span></span>
+      <span style="width:120px;flex-shrink:0">
+        <input type="number" style="font-size:13px;padding:5px 8px;text-align:right;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%"
+          placeholder="振込額" value="${r.paid||''}" onchange="savePayment('${r.payYrmo}',this.value)">
+      </span>
+    </div>`).join('');
 }
 
-function copyInvoice() {
-  const txt = document.getElementById('invoice-out').textContent;
-  navigator.clipboard.writeText(txt).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));
+function addRateHistory(){
+  const from=document.getElementById('rh-from').value;
+  if(!from){showFlash('rh-msg','開始月を入力してください',false);return;}
+  const to=document.getElementById('rh-to').value||'';
+  const r={};
+  ALL_RATE_KEYS.forEach(k=>{const v=parseFloat(document.getElementById('rh-'+k).value);if(v)r[k]=v;});
+  if(!Object.keys(r).length){showFlash('rh-msg','少なくとも1つの単価を入力してください',false);return;}
+  rateHistory.push({from,to,rates:r});rateHistory.sort((a,b)=>b.from.localeCompare(a.from));
+  save();renderRateHistory();showFlash('rh-msg','追加しました',true);
+  ['rh-from','rh-to',...ALL_RATE_KEYS.map(k=>'rh-'+k)].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+}
+function deleteRateHistory(idx){if(!confirm('この履歴を削除しますか？'))return;rateHistory.splice(idx,1);save();renderRateHistory();}
+function renderRateHistory(){
+  const el=document.getElementById('rate-history-list');
+  if(!rateHistory.length){el.innerHTML='<p style="font-size:13px;color:var(--text2)">履歴がありません</p>';return;}
+  el.innerHTML=rateHistory.map((h,i)=>{
+    const rStr=Object.entries(h.rates).map(([k,v])=>`${TYPE_LABEL[k]||k}:¥${v}`).join('、');
+    return`<div class="rate-history-item">
+      <div style="flex:1"><div style="font-weight:500">${h.from} 〜 ${h.to||'現在'}</div><div style="font-size:12px;color:var(--text2);margin-top:2px">${rStr}</div></div>
+      <button class="btn btn-sm btn-danger" onclick="deleteRateHistory(${i})">削除</button>
+    </div>`;
+  }).join('');
 }
 
-function syncToGcal(shift) {
-  if (!window._gcalToken) return;
-  const isClass = !TYPE_HOURLY[shift.type];
-  const title   = TYPE_GCAL[shift.type] + (shift.memo ? ' ' + shift.memo : '');
-  fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-    method: 'POST',
-    headers: {'Authorization':'Bearer '+window._gcalToken, 'Content-Type':'application/json'},
-    body: JSON.stringify({
-      summary: title,
-      start: {dateTime:`${shift.date}T${shift.start}:00`, timeZone:'Asia/Tokyo'},
-      end:   {dateTime:`${shift.date}T${shift.end}:00`,   timeZone:'Asia/Tokyo'},
-      reminders: {useDefault:false, overrides: isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
+function syncToGcal(shift){
+  if(!window._gcalToken)return;
+  const isClass=!TYPE_HOURLY[shift.type];
+  fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
+    method:'POST',headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+    body:JSON.stringify({
+      summary:TYPE_GCAL[shift.type]+(shift.memo?' '+shift.memo:''),
+      start:{dateTime:`${shift.date}T${shift.start}:00`,timeZone:'Asia/Tokyo'},
+      end:{dateTime:`${shift.date}T${shift.end}:00`,timeZone:'Asia/Tokyo'},
+      reminders:{useDefault:false,overrides:isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
     })
-  })
-  .then(r=>r.json())
-  .then(data=>{
-    if (data.id) {
-      const s = shifts.find(x=>x.id===shift.id);
-      if (s) { s.gcalEventId = data.id; save(); renderShifts(); }
-    }
-  })
-  .catch(()=>{});
+  }).then(r=>r.json()).then(data=>{if(data.id){const s=shifts.find(x=>x.id===shift.id);if(s){s.gcalEventId=data.id;save();renderShifts();}}}).catch(()=>{});
+}
+function deleteFromGcal(gcalEventId){
+  if(!window._gcalToken||!gcalEventId)return;
+  fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`,{method:'DELETE',headers:{'Authorization':'Bearer '+window._gcalToken}}).catch(()=>{});
 }
 
-function deleteFromGcal(gcalEventId) {
-  if (!window._gcalToken || !gcalEventId) return;
-  fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`, {
-    method: 'DELETE',
-    headers: {'Authorization':'Bearer '+window._gcalToken}
-  }).catch(()=>{});
-}
-
-function exportData() {
-  const blob = new Blob([JSON.stringify({version:APP_VERSION,shifts,rates},null,2)],{type:'application/json'});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a'); a.href=url; a.download=`shifts_${toLocalDateStr(new Date())}.json`; a.click();
+function exportData(){
+  const blob=new Blob([JSON.stringify({version:APP_VERSION,shifts,rates,rateHistory,payments,annualGoals},null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`shifts_${toLocalDateStr(new Date())}.json`;a.click();
   URL.revokeObjectURL(url);
 }
-function importData() { document.getElementById('import-file').click(); }
-function handleImport(e) {
-  const file = e.target.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      if (data.shifts) { shifts=data.shifts; saveLocal(); }
-      if (data.rates)  { rates={...rates,...data.rates}; try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){} }
-      renderShifts(); renderMetrics(); checkConflicts();
-      ['normal','camp','training','dev','mtg','sns','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
+function importData(){document.getElementById('import-file').click();}
+function handleImport(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const data=JSON.parse(ev.target.result);
+      if(data.shifts){shifts=data.shifts;saveLocal();}
+      if(data.rates){rates={...rates,...data.rates};try{localStorage.setItem('rates_v2',JSON.stringify(rates));}catch(ex){}}
+      if(data.rateHistory)rateHistory=data.rateHistory;
+      if(data.payments)payments=data.payments;
+      if(data.annualGoals)annualGoals=data.annualGoals;
+      renderAll();ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
       alert('インポートしました');
-    } catch(ex) { alert('ファイルの読み込みに失敗しました'); }
+    }catch(ex){alert('ファイルの読み込みに失敗しました');}
   };
   reader.readAsText(file);
 }
-function clearAll() {
-  if (confirm('全データを削除しますか？この操作は取り消せません。')) {
-    shifts=[]; save(); renderShifts(); renderMetrics(); checkConflicts();
+function clearAll(){
+  if(confirm('全データを削除しますか？この操作は取り消せません。')){
+    shifts=[];rateHistory=[];payments={};annualGoals={};
+    save();renderAll();
   }
 }
 
-function init() {
+function init(){
   loadLocal();
-  document.getElementById('new-date').value = toLocalDateStr(new Date());
-  const now = new Date();
-  document.getElementById('bulk-month').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  ['normal','camp','training','dev','mtg','sns','close'].forEach(k=>{ const el=document.getElementById('rate-'+k); if(el) el.value=rates[k]||''; });
-  renderShifts(); renderMetrics(); checkConflicts(); buildWeekGrid();
+  document.getElementById('new-date').value=toLocalDateStr(new Date());
+  const now=new Date();
+  document.getElementById('bulk-month').value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
+  renderAll();buildWeekGrid();
 }
 init();
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(reg => {
-    reg.addEventListener('updatefound', () => {
-      const newWorker = reg.installing;
-      newWorker.addEventListener('statechange', () => {
-        if (newWorker.state==='installed' && navigator.serviceWorker.controller) {
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+    reg.addEventListener('updatefound',()=>{
+      const nw=reg.installing;
+      nw.addEventListener('statechange',()=>{
+        if(nw.state==='installed'&&navigator.serviceWorker.controller)
           document.getElementById('update-banner').style.display='flex';
-        }
       });
     });
   });

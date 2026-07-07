@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プライバシーポリシー | ClassmallKids シフト・請求書管理</title>
+<style>
+  :root { --bg: #ffffff; --text: #111111; --text2: #666666; --border: rgba(0,0,0,0.12); }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111111; --text: #f0f0f0; --text2: #aaaaaa; --border: rgba(255,255,255,0.1); }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.8; }
+  .container { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+  .header { margin-bottom: 40px; padding-bottom: 20px; border-bottom: 0.5px solid var(--border); }
+  .header h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+  .header p { font-size: 14px; color: var(--text2); }
+  h2 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; }
+  p { font-size: 15px; color: var(--text2); margin-bottom: 12px; }
+  ul { font-size: 15px; color: var(--text2); margin-bottom: 12px; padding-left: 24px; }
+  ul li { margin-bottom: 6px; }
+  .footer { margin-top: 48px; padding-top: 20px; border-top: 0.5px solid var(--border); font-size: 13px; color: var(--text2); }
+  a { color: inherit; }
+  .back-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text2); text-decoration: none; margin-bottom: 24px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back-btn">← アプリに戻る</a>
+  <div class="header">
+    <h1>プライバシーポリシー</h1>
+    <p>ClassmallKids シフト・請求書管理</p>
+    <p>最終更新日：2026年7月7日</p>
+  </div>
+
+  <h2>1. はじめに</h2>
+  <p>「ClassmallKids シフト・請求書管理」（以下「本サービス」）は、りゅう先生（以下「運営者」）が提供するシフト管理および請求書生成を目的としたウェブアプリケーションです。本プライバシーポリシーは、本サービスにおける利用者の個人情報の取り扱いについて説明します。</p>
+
+  <h2>2. 収集する情報</h2>
+  <p>本サービスでは以下の情報を収集・利用します：</p>
+  <ul>
+    <li><strong>Googleアカウント情報：</strong>ログイン時にGoogleが提供する氏名・メールアドレス・ユーザーID</li>
+    <li><strong>シフト情報：</strong>利用者が入力する勤務日時・業務種別・担当コース等</li>
+    <li><strong>報酬情報：</strong>利用者が設定する時給・コマ単価・振込額等</li>
+    <li><strong>Googleカレンダー情報：</strong>シフト登録時にGoogleカレンダーへ書き込むイベント情報</li>
+  </ul>
+
+  <h2>3. 情報の利用目的</h2>
+  <p>収集した情報は以下の目的でのみ使用します：</p>
+  <ul>
+    <li>シフトの登録・管理・表示</li>
+    <li>請求書テキストの自動生成</li>
+    <li>Googleカレンダーへの予定登録</li>
+    <li>複数端末間でのデータ同期</li>
+    <li>報酬の概算計算</li>
+  </ul>
+
+  <h2>4. 情報の保存・管理</h2>
+  <p>利用者のデータはGoogleが提供するFirebase（Firestore）に保存されます。データはGoogleのセキュリティ基準に従って管理され、各利用者は自分のデータにのみアクセスできます。他の利用者のデータを閲覧・編集することはできません。</p>
+
+  <h2>5. 第三者への情報提供</h2>
+  <p>運営者は、以下の場合を除き、利用者の個人情報を第三者に提供しません：</p>
+  <ul>
+    <li>利用者本人の同意がある場合</li>
+    <li>法令に基づく場合</li>
+  </ul>
+
+  <h2>6. 利用する外部サービス</h2>
+  <p>本サービスは以下の外部サービスを利用しています：</p>
+  <ul>
+    <li><strong>Firebase（Google）：</strong>認証・データ保存・同期</li>
+    <li><strong>Google Calendar API：</strong>カレンダーへの予定登録</li>
+    <li><strong>Netlify：</strong>アプリのホスティング</li>
+  </ul>
+  <p>各サービスのプライバシーポリシーについては、各社のウェブサイトをご確認ください。</p>
+
+  <h2>7. Googleカレンダーの利用について</h2>
+  <p>本サービスはGoogleカレンダーへのアクセス権限を利用者の同意のもとで取得します。取得したアクセストークンはシフト情報のカレンダー登録・削除のみに使用し、それ以外の目的には使用しません。アクセストークンは約1時間で自動的に失効します。</p>
+
+  <h2>8. データの削除</h2>
+  <p>利用者はアプリ内の「設定」→「全削除」からいつでも自分のデータを削除できます。アカウントの削除をご希望の場合は、運営者までお問い合わせください。</p>
+
+  <h2>9. Cookie・ローカルストレージの利用</h2>
+  <p>本サービスはブラウザのローカルストレージを使用してセッション情報を保存します。これはサービスの正常な動作に必要なものであり、広告目的では使用しません。</p>
+
+  <h2>10. プライバシーポリシーの変更</h2>
+  <p>本ポリシーは必要に応じて改訂されることがあります。重要な変更がある場合はアプリ内でお知らせします。</p>
+
+  <h2>11. お問い合わせ</h2>
+  <p>本プライバシーポリシーに関するお問い合わせは、運営者（りゅう先生）までご連絡ください。連絡方法については別途ご案内します。</p>
+
+  <div class="footer">
+    <p>© 2026 ClassmallKids シフト・請求書管理 | りゅう先生</p>
+    <p><a href="/terms.html">利用規約</a></p>
+  </div>
+</div>
+</body>
+</html>
