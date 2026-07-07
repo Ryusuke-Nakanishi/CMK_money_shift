@@ -10,9 +10,22 @@
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>ClassmallKids シフト・請求書管理</title>
+<script>
+// ── 認証チェック（最初に実行）──
+(function() {
+  const token     = localStorage.getItem('gcal_token');
+  const expiresAt = parseInt(localStorage.getItem('gcal_token_expires') || '0');
+  if (!token || Date.now() >= expiresAt) {
+    // トークンをクリアしてログインページへ
+    localStorage.removeItem('gcal_token');
+    localStorage.removeItem('gcal_token_expires');
+    window.location.href = '/login.html';
+  }
+})();
+</script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
-  import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged }
+  import { getAuth, onAuthStateChanged, signOut }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
   import { getFirestore, doc, setDoc, onSnapshot }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
@@ -29,105 +42,83 @@
   const app  = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
-  let unsubscribe      = null;
-  let tokenExpireTimer = null;
-  let autoSignOutTimer = null;
+  let unsubscribe    = null;
+  let expiryTimer    = null;
 
-  window.googleSignIn = async function() {
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential && credential.accessToken) {
-        const now = Date.now();
-        window._gcalToken = credential.accessToken;
-        try {
-          localStorage.setItem('gcal_token', credential.accessToken);
-          localStorage.setItem('gcal_token_time', now);
-          localStorage.setItem('gcal_uid', result.user.uid);
-        } catch(e) {}
-        scheduleTokenExpiry(55 * 60 * 1000);
-        scheduleAutoSignOut(60 * 60 * 1000);
+  // トークン有効期限を監視してステータスバーを更新
+  function startExpiryWatch() {
+    if (expiryTimer) clearInterval(expiryTimer);
+    expiryTimer = setInterval(() => {
+      const expiresAt = parseInt(localStorage.getItem('gcal_token_expires') || '0');
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) {
+        clearInterval(expiryTimer);
+        localStorage.removeItem('gcal_token');
+        localStorage.removeItem('gcal_token_expires');
+        window.location.href = '/login.html';
+      } else if (remaining <= 5 * 60 * 1000) {
+        setStatusBar('expiring');
+      } else if (window._statusState === 'synced') {
+        setStatusBar('synced'); // 残り時間を毎分更新
       }
-    } catch(e) {
-      if (e.code !== 'auth/popup-closed-by-user') alert('ログインに失敗しました: ' + e.message);
-    }
-  };
-
-  function scheduleTokenExpiry(ms) {
-    if (tokenExpireTimer) clearTimeout(tokenExpireTimer);
-    tokenExpireTimer = setTimeout(() => {
-      window._gcalToken = null;
-      try { localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); } catch(e) {}
-      setStatusBar('expired', auth.currentUser?.displayName || auth.currentUser?.email || '');
-    }, ms);
+    }, 60 * 1000); // 1分ごとにチェック・更新
   }
 
-  function scheduleAutoSignOut(ms) {
-    if (autoSignOutTimer) clearTimeout(autoSignOutTimer);
-    autoSignOutTimer = setTimeout(() => {
-      if (typeof window.showReloginModal === 'function') window.showReloginModal();
-    }, ms);
-  }
-
-  window.googleSignOut = async function() {
-    clearAllTimers();
-    window._gcalToken = null;
-    try { localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); localStorage.removeItem('gcal_uid'); } catch(e) {}
+  // ログアウト
+  window.doSignOut = async function() {
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (expiryTimer) { clearInterval(expiryTimer); expiryTimer = null; }
+    localStorage.removeItem('gcal_token');
+    localStorage.removeItem('gcal_token_expires');
+    localStorage.removeItem('gcal_uid');
+    localStorage.removeItem('login_time');
     await signOut(auth);
-    updateAuthUI(null);
-    if (typeof window.onSignedOut === 'function') window.onSignedOut();
+    window.location.href = '/login.html';
   };
 
-  function clearAllTimers() {
-    if (unsubscribe)      { unsubscribe(); unsubscribe = null; }
-    if (tokenExpireTimer) { clearTimeout(tokenExpireTimer); tokenExpireTimer = null; }
-    if (autoSignOutTimer) { clearTimeout(autoSignOutTimer); autoSignOutTimer = null; }
-  }
-
+  // データ保存
   window.saveToFirebase = async function(shifts, rates, rateHistory, payments) {
     const user = auth.currentUser; if (!user) return;
     try {
-      await setDoc(doc(db, 'users', user.uid), { shifts, rates, rateHistory: rateHistory||[], payments: payments||{}, updatedAt: Date.now() });
-      setStatusBar('synced', user.displayName || user.email);
+      await setDoc(doc(db, 'users', user.uid), {
+        shifts, rates, rateHistory: rateHistory||[], payments: payments||{}, updatedAt: Date.now()
+      });
+      updateSyncTime();
     } catch(e) { console.warn('Firebase save error', e); }
   };
 
-  function setStatusBar(state, name) {
+  // ステータスバー更新
+  function setStatusBar(state) {
     const bar = document.getElementById('status-bar');
     if (!bar) return;
-    if (state === 'checking') {
-      bar.style.display='flex'; bar.style.background='var(--bg3)'; bar.style.color='var(--text3)'; bar.style.borderBottom='0.5px solid var(--border)';
-      bar.innerHTML='確認中...';
-    } else if (state === 'synced') {
-      bar.style.display='flex'; bar.style.background='var(--success-bg)'; bar.style.color='var(--success-text)'; bar.style.borderBottom='0.5px solid var(--success-text)';
-      bar.innerHTML=`✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">${new Date().toLocaleTimeString('ja-JP')}</span>`;
+    const expiresAt = parseInt(localStorage.getItem('gcal_token_expires') || '0');
+    const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 60000));
+    if (state === 'synced') {
+      bar.style.display='flex';bar.style.background='var(--success-bg)';bar.style.color='var(--success-text)';bar.style.borderBottom='0.5px solid var(--success-text)';
+      const name = auth.currentUser?.displayName || auth.currentUser?.email || '';
+      bar.innerHTML=`✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">残り${remaining}分 | ${new Date().toLocaleTimeString('ja-JP')}</span>`;
     } else if (state === 'syncing') {
-      bar.style.display='flex'; bar.style.background='var(--warning-bg)'; bar.style.color='var(--warning-text)'; bar.style.borderBottom='0.5px solid var(--close-color)';
+      bar.style.display='flex';bar.style.background='var(--warning-bg)';bar.style.color='var(--warning-text)';bar.style.borderBottom='0.5px solid var(--close-color)';
       bar.innerHTML='⟳ 同期中...';
-    } else if (state === 'expired') {
-      bar.style.display='flex'; bar.style.background='var(--danger-bg)'; bar.style.color='var(--danger-text)'; bar.style.borderBottom='0.5px solid var(--danger-text)';
-      bar.innerHTML=`⚠ カレンダー連携が切れました &nbsp;<button onclick="googleSignIn()" style="font-size:11px;padding:2px 8px;cursor:pointer;border:0.5px solid var(--danger-text);border-radius:4px;background:none;color:var(--danger-text)">再接続</button>`;
+    } else if (state === 'expiring') {
+      bar.style.display='flex';bar.style.background='var(--warning-bg)';bar.style.color='var(--warning-text)';bar.style.borderBottom='0.5px solid var(--close-color)';
+      bar.innerHTML=`⚠ セッションの有効期限が間もなく切れます（残り${remaining}分）&nbsp;<a href="/login.html" style="font-size:11px;padding:2px 8px;border:.5px solid var(--warning-text);border-radius:4px;color:var(--warning-text);text-decoration:none">再ログイン</a>`;
     } else {
       bar.style.display='none';
     }
-    window._statusState = state;
   }
 
-  function updateAuthUI(user) {
-    const signinArea=document.getElementById('auth-signin-area');
-    const signoutArea=document.getElementById('auth-signout-area');
-    const userName=document.getElementById('auth-user-name');
-    if (!signinArea) return;
-    if (user) { signinArea.style.display='none'; signoutArea.style.display='block'; if(userName) userName.textContent=user.displayName||user.email; }
-    else { signinArea.style.display='block'; signoutArea.style.display='none'; setStatusBar('none',''); }
+  function updateSyncTime() {
+    const bar = document.getElementById('status-bar');
+    if (!bar || window._statusState !== 'synced') return;
+    setStatusBar('synced');
   }
 
+  // リアルタイム同期
   function startSync(user) {
     if (unsubscribe) unsubscribe();
-    setStatusBar('syncing', user.displayName || user.email);
+    setStatusBar('syncing');
+    window._statusState = 'syncing';
     unsubscribe = onSnapshot(doc(db, 'users', user.uid), snap => {
       if (snap.exists()) {
         const data = snap.data();
@@ -137,33 +128,31 @@
         if (data.payments)    window._fbPayments    = data.payments;
         if (typeof window.onFirebaseDataLoaded === 'function') window.onFirebaseDataLoaded();
       }
-      setStatusBar('synced', user.displayName || user.email);
-    }, err => { console.warn('snapshot error', err); setStatusBar('expired', user.displayName || user.email); });
+      window._statusState = 'synced';
+      setStatusBar('synced');
+    }, err => {
+      console.warn('snapshot error', err);
+    });
   }
 
-  setStatusBar('checking', '');
+  // 認証状態監視
   onAuthStateChanged(auth, user => {
-    updateAuthUI(user);
+    const userName = document.getElementById('auth-user-name');
     if (user) {
+      if (userName) userName.textContent = user.displayName || user.email;
+      // 別アカウント切り替え検知
       const prevUid = localStorage.getItem('gcal_uid');
       if (prevUid && prevUid !== user.uid) {
-        localStorage.removeItem('shifts_v3'); localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time');
+        localStorage.removeItem('shifts_v3');
         if (typeof window.onAccountChanged === 'function') window.onAccountChanged();
       }
       localStorage.setItem('gcal_uid', user.uid);
-      const t = localStorage.getItem('gcal_token');
-      const tokenTime = parseInt(localStorage.getItem('gcal_token_time') || '0');
-      const elapsed = Date.now() - tokenTime;
-      if (t && elapsed < 55 * 60 * 1000) {
-        window._gcalToken = t;
-        scheduleTokenExpiry(55 * 60 * 1000 - elapsed);
-        scheduleAutoSignOut(60 * 60 * 1000 - elapsed);
-      } else if (t) {
-        localStorage.removeItem('gcal_token'); localStorage.removeItem('gcal_token_time'); window._gcalToken = null;
-      }
+      window._gcalToken = localStorage.getItem('gcal_token');
       startSync(user);
+      startExpiryWatch();
     } else {
-      clearAllTimers(); setStatusBar('none', '');
+      // Firebaseセッションなし → ログインページへ
+      window.location.href = '/login.html';
     }
   });
 </script>
@@ -232,11 +221,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .day-btn:disabled{opacity:.3;cursor:default}
 .rate-note{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.5}
 .divider{height:.5px;background:var(--border);margin:12px 0}
-.auth-box{border:.5px dashed var(--border2);border-radius:var(--radius-sm);padding:14px}
 .flash{font-size:13px;margin-top:8px;display:none;padding:6px 10px;border-radius:var(--radius-sm)}
 .flash.ok{background:var(--success-bg);color:var(--success-text);display:block}
 .flash.err{background:var(--danger-bg);color:var(--danger-text);display:block}
-.connected-box{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--success-text);background:var(--success-bg);padding:8px 12px;border-radius:var(--radius-sm);margin-bottom:8px}
 .year-nav{display:flex;align-items:center;gap:8px}
 .year-nav span{font-size:15px;font-weight:500;min-width:60px;text-align:center}
 .annual-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
@@ -254,11 +241,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .modal{background:var(--bg);border-radius:var(--radius);padding:20px;width:100%;max-width:400px}
 .modal h3{font-size:16px;font-weight:600;margin-bottom:16px}
 .modal-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
-.relogin-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:none;align-items:center;justify-content:center;padding:16px}
-.relogin-overlay.open{display:flex}
-.relogin-modal{background:var(--bg);border-radius:var(--radius);padding:24px;width:100%;max-width:360px;text-align:center}
-.relogin-modal h3{font-size:18px;font-weight:600;margin-bottom:12px}
-.relogin-modal p{font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.6}
 /* ホーム */
 .today-shift-item{display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg2);border-radius:var(--radius-sm);margin-bottom:8px}
 .today-shift-item:last-child{margin-bottom:0}
@@ -279,6 +261,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .manual-section h3{font-size:15px;font-weight:600;margin-bottom:8px}
 .manual-section p,.manual-section li{font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:4px}
 .manual-section ul{padding-left:20px}
+/* ユーザー情報 */
+.user-info{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
 </style>
 </head>
 <body>
@@ -286,15 +270,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div id="update-banner">
   <span>🔄 新しいバージョンが利用可能です</span>
   <button onclick="location.reload()">更新する</button>
-</div>
-
-<div class="relogin-overlay" id="relogin-modal">
-  <div class="relogin-modal">
-    <h3>⏱ セッションが切れました</h3>
-    <p>セキュリティのため、1時間ごとに再ログインが必要です。データは保持されています。</p>
-    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="reloginAndClose()">🔗 再ログイン</button>
-    <button class="btn" style="width:100%;justify-content:center;margin-top:8px" onclick="closeReloginModal()">後で行う</button>
-  </div>
 </div>
 
 <div class="modal-overlay" id="edit-modal">
@@ -346,7 +321,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         </div>
         <div style="font-size:13px;color:var(--text2)" id="today-greeting"></div>
       </div>
-      <div class="section-title">本日のシフト</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin-bottom:0">シフト</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-sm" onclick="homePrevDay()">‹</button>
+          <input type="date" id="home-date-picker" onchange="renderHomeShifts()" style="font-size:13px;padding:4px 8px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text)">
+          <button class="btn btn-sm" onclick="homeNextDay()">›</button>
+        </div>
+      </div>
       <div id="today-shifts"></div>
     </div>
     <div class="card">
@@ -419,7 +401,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
   </div>
 
-  <!-- 一括登録 -->
+  <!-- 一括 -->
   <div id="tab-bulk" class="panel">
     <div class="card">
       <div class="section-title">月別一括登録</div>
@@ -523,7 +505,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <ul>
           <li>業務種別・日付・開始〜終了時刻を入力して「＋追加」をタップ</li>
           <li>担当コースを入力するとGoogleカレンダーのタイトルに反映されます（例：【通常】ジュニア）</li>
-          <li>講師外業務（研修・開発・MTG・SNS）は「編集」ボタンで後から時間・メモを変更できます</li>
+          <li>講師外業務は「編集」ボタンで後から時間・メモを変更できます</li>
           <li>生徒が来なかった場合は「クローズ」ボタンを押すと、その他MTG 15分として自動計算されます</li>
         </ul>
       </div>
@@ -557,23 +539,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       </div>
       <div class="divider"></div>
       <div class="manual-section">
-        <h3>⚙️ 設定</h3>
+        <h3>⚙️ 設定・ログアウト</h3>
         <ul>
-          <li><strong>時給・コマ単価：</strong>各業務の単価を設定します。変更後は自動で保存されます</li>
-          <li><strong>期間別時給履歴：</strong>昇給があった場合、開始月と新しい単価を登録すると過去の月にも正しい金額が適用されます</li>
-          <li><strong>Googleアカウント連携：</strong>ログインするとカレンダー自動登録とデータ同期が有効になります。セキュリティのため1時間ごとに再ログインが必要です</li>
-          <li><strong>エクスポート：</strong>データをJSONファイルとして保存できます。機種変更時の引き継ぎに使用してください</li>
-        </ul>
-      </div>
-      <div class="divider"></div>
-      <div class="manual-section">
-        <h3>🗓 Googleカレンダー連携</h3>
-        <ul>
-          <li>設定タブから「Googleアカウントでログイン」を行うと連携が有効になります</li>
-          <li>シフト追加時に自動でGoogleカレンダーに予定が登録されます</li>
-          <li>授業は15分前、講師外業務は10分前に通知が届きます</li>
-          <li>シフト削除時はGoogleカレンダーからも自動削除されます</li>
-          <li>アクセストークンは1時間で失効します。失効後は再ログインしてください</li>
+          <li>時給・コマ単価を設定します。変更後は自動で保存されます</li>
+          <li>昇給があった場合、期間別時給履歴に登録すると過去の月にも正しい金額が適用されます</li>
+          <li>セッションは約1時間で自動終了します。終了後はログイン画面に移動します</li>
+          <li>残り5分になるとステータスバーに警告が表示されます</li>
         </ul>
       </div>
     </div>
@@ -581,6 +552,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
   <!-- 設定 -->
   <div id="tab-settings" class="panel">
+    <div class="card">
+      <div class="section-title">アカウント</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <p style="font-size:13px;font-weight:500" id="auth-user-name"></p>
+          <p style="font-size:12px;color:var(--text2);margin-top:2px">Googleアカウントでログイン中</p>
+        </div>
+        <button class="btn btn-sm btn-danger" onclick="doSignOut()">ログアウト</button>
+      </div>
+    </div>
+
     <div class="card">
       <div class="section-title">時給・コマ単価（現在）</div>
       <div class="form-grid" style="margin-bottom:10px">
@@ -633,21 +615,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
 
     <div class="card">
-      <div class="section-title">Googleアカウント連携</div>
-      <div class="auth-box">
-        <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Googleアカウントでログインすると、Googleカレンダーへの自動登録・複数端末でのデータ同期が有効になります。セキュリティのため1時間ごとに再ログインが必要です。</p>
-        <div id="auth-signin-area">
-          <button class="btn btn-primary" onclick="googleSignIn()">🔗 Googleアカウントでログイン</button>
-        </div>
-        <div id="auth-signout-area" style="display:none">
-          <div class="connected-box">✓ ログイン中: <strong id="auth-user-name" style="margin-left:4px"></strong></div>
-          <p style="font-size:12px;color:var(--text2);margin-bottom:8px">データ同期・カレンダー連携が有効です。</p>
-          <button class="btn btn-sm" onclick="googleSignOut()">ログアウト</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
       <div class="section-title">データ管理</div>
       <div class="btn-row">
         <button class="btn" onclick="exportData()">📥 エクスポート</button>
@@ -661,7 +628,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="card">
       <div class="section-title">バージョン情報</div>
       <p style="font-size:13px;color:var(--text2)">現在のバージョン: <strong id="ver-display"></strong></p>
-      <p class="rate-note">新バージョンが利用可能になると画面上部にお知らせが表示されます。</p>
     </div>
   </div>
 
@@ -694,12 +660,8 @@ let rateHistory=[],payments={},annualGoals={};
 let viewMonth=new Date();viewMonth.setDate(1);
 let viewYear=new Date().getFullYear();
 let calMonth=new Date();calMonth.setDate(1);
-window._gcalToken=null;
-
-// 再ログインモーダル
-window.showReloginModal=function(){document.getElementById('relogin-modal').classList.add('open');};
-function closeReloginModal(){document.getElementById('relogin-modal').classList.remove('open');}
-async function reloginAndClose(){closeReloginModal();await window.googleSignIn();}
+window._gcalToken=localStorage.getItem('gcal_token');
+window._statusState='';
 
 // Firebase受信
 window._fbShifts=null;window._fbRates=null;window._fbRateHistory=null;window._fbPayments=null;
@@ -708,13 +670,8 @@ window.onFirebaseDataLoaded=function(){
   if(window._fbRates!==null)rates={...rates,...window._fbRates};
   if(window._fbRateHistory!==null)rateHistory=window._fbRateHistory;
   if(window._fbPayments!==null){const d=window._fbPayments;payments=d.amounts||d;annualGoals=d.goals||annualGoals;}
-  saveLocal();
-  renderAll();
+  saveLocal();renderAll();
   ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
-};
-window.onSignedOut=function(){
-  shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
-  renderAll();ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value='';});
 };
 window.onAccountChanged=function(){
   shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
@@ -725,14 +682,12 @@ function renderAll(){renderShifts();renderMetrics();checkConflicts();renderAnnua
 function toLocalDateStr(dt){return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
 function toMonthStr(yr,mo){return`${yr}-${String(mo+1).padStart(2,'0')}`;}
 
-// Storage
 function loadLocal(){
   try{
     const s=localStorage.getItem('shifts_v3');if(s)shifts=JSON.parse(s);
     const r=localStorage.getItem('rates_v2');if(r)rates={...rates,...JSON.parse(r)};
     const rh=localStorage.getItem('rate_history');if(rh)rateHistory=JSON.parse(rh);
     const p=localStorage.getItem('payments_v1');if(p){const d=JSON.parse(p);payments=d.amounts||d;annualGoals=d.goals||{};}
-    const t=localStorage.getItem('gcal_token');if(t)window._gcalToken=t;
   }catch(e){}
 }
 function saveLocal(){
@@ -786,23 +741,12 @@ function renderHome(){
   document.getElementById('today-day').textContent=days[now.getDay()];
   const h=now.getHours();
   document.getElementById('today-greeting').textContent=h<12?'おはようございます！':h<18?'お疲れ様です！':'お疲れ様でした！';
-
-  const todayShifts=shifts.filter(s=>s.date===todayStr&&!s.closed).sort((a,b)=>a.start<b.start?-1:1);
-  const tsEl=document.getElementById('today-shifts');
-  if(!todayShifts.length){
-    tsEl.innerHTML='<div class="no-shift">本日のシフトはありません</div>';
-  }else{
-    tsEl.innerHTML=todayShifts.map(s=>`
-      <div class="today-shift-item">
-        <div style="width:8px;height:8px;border-radius:50%;background:${TYPE_COLOR[s.type]};flex-shrink:0"></div>
-        <div style="font-size:15px;font-weight:600;min-width:90px">${s.start}〜${s.end}</div>
-        <div style="font-size:13px;color:var(--text2)">${TYPE_LABEL[s.type]}${s.memo?'・'+s.memo:''}</div>
-      </div>`).join('');
-  }
-
+  // 日付ピッカーを今日の日付で初期化
+  const picker=document.getElementById('home-date-picker');
+  if(picker&&!picker.value) picker.value=todayStr;
+  renderHomeShifts();
   const yr=now.getFullYear(),mo=now.getMonth();
-  const yrmo=toMonthStr(yr,mo);
-  const r=getRatesForMonth(yrmo);
+  const r=getRatesForMonth(toMonthStr(yr,mo));
   const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
   let koma=0,pay=0;
   list.forEach(s=>{
@@ -815,6 +759,61 @@ function renderHome(){
     <div class="metric-card"><div class="label">今月のコマ数</div><div class="value">${koma}コマ</div></div>
     <div class="metric-card"><div class="label">今月の概算報酬</div><div class="value">¥${Math.round(pay).toLocaleString()}</div></div>`;
   renderMiniCal();
+}
+
+function renderHomeShifts(){
+  const picker=document.getElementById('home-date-picker');
+  if(!picker)return;
+  const dateStr=picker.value||toLocalDateStr(new Date());
+  const dt=new Date(dateStr+'T00:00:00');
+  const days=['日','月','火','水','木','金','土'];
+  const dayLabel=`（${days[dt.getDay()]}）`;
+  const selectedShifts=shifts.filter(s=>s.date===dateStr).sort((a,b)=>a.start<b.start?-1:1);
+  const tsEl=document.getElementById('today-shifts');
+  if(!selectedShifts.length){
+    tsEl.innerHTML='<div class="no-shift">この日のシフトはありません</div>';
+  }else{
+    tsEl.innerHTML=selectedShifts.map(s=>{
+      const isHourly=TYPE_HOURLY[s.type];
+      const isClass=s.type==="normal"||s.type==="camp";
+      const h=durationH(s.start,s.end);
+      let detail=isHourly?`${h.toFixed(1)}h`:"1コマ";
+      if(s.closed)detail="クローズ 15分";
+      const closedBadge=s.closed?`<span style="font-size:10px;padding:1px 6px;border-radius:20px;background:var(--warning-bg);color:var(--warning-text)">クローズ</span>`:"";
+      const gcalBadge=s.gcalEventId?`<span style="font-size:10px;padding:1px 6px;border-radius:20px;background:var(--success-bg);color:var(--success-text)">📅</span>`:"";
+      const editBtn=isHourly?`<button class="btn btn-edit btn-sm" onclick="openEditModal(${s.id})" style="font-size:11px;padding:3px 8px">編集</button>`:"";
+      const closeBtn=isClass?`<button class="btn btn-sm ${s.closed?"btn-reopen":"btn-warn"}" onclick="toggleClose(${s.id});renderHomeShifts();" style="font-size:11px;padding:3px 8px">${s.closed?"解除":"クローズ"}</button>`:"";
+      return`<div class="today-shift-item" style="align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+          <div style="width:8px;height:8px;border-radius:50%;background:${s.closed?"#888":TYPE_COLOR[s.type]};flex-shrink:0;margin-top:4px"></div>
+          <div style="min-width:0">
+            <div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              ${s.start}〜${s.end} ${closedBadge}${gcalBadge}
+            </div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">${TYPE_LABEL[s.type]}${s.memo?"・"+s.memo:""} （${detail}）</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">${editBtn}${closeBtn}<button class="btn btn-sm btn-danger" onclick="deleteShift(${s.id});renderHomeShifts();" style="font-size:11px;padding:3px 8px">削除</button></div>
+      </div>`;
+    }).join("");
+  }
+}
+
+function homePrevDay(){
+  const picker=document.getElementById('home-date-picker');
+  if(!picker)return;
+  const d=new Date((picker.value||toLocalDateStr(new Date()))+"T00:00:00");
+  d.setDate(d.getDate()-1);
+  picker.value=toLocalDateStr(d);
+  renderHomeShifts();
+}
+function homeNextDay(){
+  const picker=document.getElementById('home-date-picker');
+  if(!picker)return;
+  const d=new Date((picker.value||toLocalDateStr(new Date()))+"T00:00:00");
+  d.setDate(d.getDate()+1);
+  picker.value=toLocalDateStr(d);
+  renderHomeShifts();
 }
 
 function renderMiniCal(){
@@ -881,7 +880,6 @@ function toggleClose(id){
   s.closed=!s.closed;
   save();renderShifts();renderMetrics();renderHome();
 }
-
 function deleteShift(id){
   if(!confirm('このシフトを削除しますか？'))return;
   const s=shifts.find(x=>x.id===id);
@@ -891,8 +889,7 @@ function deleteShift(id){
 }
 
 function durationH(s,e){
-  const[sh,sm]=s.split(':').map(Number);
-  const[eh,em]=e.split(':').map(Number);
+  const[sh,sm]=s.split(':').map(Number);const[eh,em]=e.split(':').map(Number);
   return((eh*60+em)-(sh*60+sm))/60;
 }
 
@@ -937,8 +934,7 @@ function changeMonth(d){viewMonth.setMonth(viewMonth.getMonth()+d);renderShifts(
 
 function renderMetrics(){
   const yr=viewMonth.getFullYear(),mo=viewMonth.getMonth();
-  const yrmo=toMonthStr(yr,mo);
-  const r=getRatesForMonth(yrmo);
+  const r=getRatesForMonth(toMonthStr(yr,mo));
   const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
   let komaNomal=0,komaCamp=0,hTraining=0,hDev=0,hMtg=0,hSns=0,pay=0;
   list.forEach(s=>{
@@ -1019,8 +1015,7 @@ function executeBulk(){
 }
 
 function calcMonthPay(yr,mo){
-  const yrmo=toMonthStr(yr,mo);
-  const r=getRatesForMonth(yrmo);
+  const r=getRatesForMonth(toMonthStr(yr,mo));
   const list=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()===mo;});
   let pay=0;
   list.forEach(s=>{
@@ -1063,7 +1058,6 @@ function generateInvoice(){
 }
 function copyInvoice(){navigator.clipboard.writeText(document.getElementById('invoice-out').textContent).then(()=>alert('コピーしました')).catch(()=>alert('コピーに失敗しました'));}
 
-// 年間収支（前年12月〜当年11月）
 function changeYear(d){viewYear+=d;renderAnnual();}
 function saveGoal(){annualGoals[viewYear]=parseInt(document.getElementById('annual-goal-input').value)||0;save();renderAnnual();}
 function savePayment(yrmo,val){payments[yrmo]=parseInt(val)||0;save();renderAnnual();}
@@ -1076,18 +1070,14 @@ function renderAnnual(){
   let totalCalc=0,totalPaid=0;
   const rows=[];
   for(let i=0;i<12;i++){
-    // 労働月：i=0→前年12月、i=1→当年1月、...i=11→当年11月
     const workYr=i===0?viewYear-1:viewYear;
     const workMo=i===0?11:i-1;
-    // 振込月：i=0→当年1月25日、...i=11→当年12月25日
-    const payYr=viewYear;
-    const payMoNum=i+1; // 1〜12
-    const payYrmo=`${payYr}-${String(payMoNum).padStart(2,'0')}`;
+    const payYrmo=`${viewYear}-${String(i+1).padStart(2,'0')}`;
     const calc=calcMonthPay(workYr,workMo);
     const paid=payments[payYrmo]||0;
     totalCalc+=calc;totalPaid+=paid;
     const workLabel=i===0?`${viewYear-1}年12月分`:`${viewYear}年${i}月分`;
-    const payLabel=`${payYr}/${String(payMoNum).padStart(2,'0')}/25振込`;
+    const payLabel=`${viewYear}/${String(i+1).padStart(2,'0')}/25振込`;
     rows.push({workLabel,payLabel,payYrmo,calc,paid});
   }
   document.getElementById('annual-calc').textContent='¥'+totalCalc.toLocaleString();
