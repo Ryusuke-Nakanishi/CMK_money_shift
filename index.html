@@ -27,7 +27,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
   import { getAuth, onAuthStateChanged, signOut }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc }
+  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, addDoc, updateDoc }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 
   const firebaseConfig = {
@@ -135,6 +135,32 @@
     });
   }
 
+  // ── Q&A Firebase操作 ──
+  window.fetchQAList = async function() {
+    try {
+      const snap = await getDocs(collection(db, 'qaList'));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchQAList error', e); return []; }
+  };
+  window.addQAItem = async function(keywords, answer) {
+    try {
+      await addDoc(collection(db, 'qaList'), { keywords, answer, createdAt: Date.now() });
+      return true;
+    } catch(e) { console.warn('addQAItem error', e); return false; }
+  };
+  window.updateQAItem = async function(id, keywords, answer) {
+    try {
+      await updateDoc(doc(db, 'qaList', id), { keywords, answer, updatedAt: Date.now() });
+      return true;
+    } catch(e) { console.warn('updateQAItem error', e); return false; }
+  };
+  window.deleteQAItem = async function(id) {
+    try {
+      await deleteDoc(doc(db, 'qaList', id));
+      return true;
+    } catch(e) { console.warn('deleteQAItem error', e); return false; }
+  };
+
   // 役職定義
   window.ROLES = {
     admin:      { label:'管理者',             level:6 },
@@ -222,6 +248,12 @@
       if (adminTab) {
         const canSeeAdmin = ['admin','operator','ul'].includes(allowedData.role);
         adminTab.style.display = canSeeAdmin ? '' : 'none';
+      }
+      // Q&Aタブの表示制御（ul以上）
+      const qaTab = document.getElementById('tab-btn-qa');
+      if (qaTab) {
+        const canSeeQA = ['admin','operator','ul'].includes(allowedData.role);
+        qaTab.style.display = canSeeQA ? '' : 'none';
       }
 
       // 別アカウント切り替え検知
@@ -348,6 +380,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .manual-section ul{padding-left:20px}
 /* ユーザー情報 */
 .user-info{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+  @keyframes chatFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 </style>
 </head>
 <body>
@@ -358,6 +391,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 
 <!-- ユーザー追加モーダル -->
+<!-- Q&A追加・編集モーダル -->
+<div class="modal-overlay" id="qa-modal">
+  <div class="modal">
+    <h3 id="qa-modal-title">Q&Aを追加</h3>
+    <input type="hidden" id="qa-edit-index">
+    <input type="hidden" id="qa-edit-id">
+    <div class="form-group" style="margin-bottom:10px">
+      <label>質問・キーワード（カンマ区切り）</label>
+      <input type="text" id="qa-keywords" placeholder="例: 請求書,作り方,生成">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>回答</label>
+      <textarea id="qa-answer" rows="4" style="font-size:14px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;resize:vertical" placeholder="回答を入力してください"></textarea>
+    </div>
+    <div class="flash" id="qa-msg"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeQAModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="submitQA()">保存</button>
+    </div>
+  </div>
+</div>
+
+
 <div class="modal-overlay" id="add-user-modal">
   <div class="modal">
     <h3>ユーザーを追加</h3>
@@ -441,6 +497,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <button class="tab" onclick="switchTab('manual')">📖 使い方</button>
       <button class="tab" onclick="switchTab('settings')">⚙️ 設定</button>
       <button class="tab" id="tab-btn-admin" onclick="switchTab('admin')" style="display:none">👥 管理</button>
+      <button class="tab" id="tab-btn-qa" onclick="switchTab('qa')" style="display:none">❓ Q&A管理</button>
     </div>
   </nav>
 </div>
@@ -606,6 +663,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="section-title">請求書生成</div>
       <div class="form-group" style="max-width:200px;margin-bottom:12px">
         <label>対象月</label><input type="month" id="inv-month">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <input type="checkbox" id="inv-include-normal" style="width:16px;height:16px;cursor:pointer">
+        <label for="inv-include-normal" style="font-size:13px;color:var(--text2);cursor:pointer">通常クラスも含める</label>
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="generateInvoice()">生成</button>
@@ -811,6 +872,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
 
 
+  <!-- Q&A管理タブ -->
+  <div id="tab-qa" class="panel">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin-bottom:0">Q&A管理</div>
+        <button class="btn btn-primary btn-sm" id="qa-add-btn" onclick="openAddQAModal()" style="display:none">＋ Q&A追加</button>
+      </div>
+      <div id="qa-list"><p style="font-size:13px;color:var(--text2)">読み込み中...</p></div>
+    </div>
+  </div>
+
+
+<!-- チャットボット（JS生成） -->
+
+
 <footer style="max-width:720px;margin:0 auto;padding:24px 16px;text-align:center;font-size:12px;color:var(--text3);border-top:.5px solid var(--border)">
   <p style="margin-bottom:8px">ClassmallKids シフト・請求書管理 | りゅう先生</p>
   <p>
@@ -820,7 +896,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </footer>
 
 <script>
-const APP_VERSION='3.1.1';
+const APP_VERSION='3.2.0';
 document.getElementById('ver-badge').textContent='v'+APP_VERSION;
 document.getElementById('ver-display').textContent=APP_VERSION;
 
@@ -893,7 +969,7 @@ function getRatesForMonth(yrmo){
 }
 
 function switchTab(t){
-  const ids=['home','shifts','bulk','invoice','annual','manual','settings','admin'];
+  const ids=['home','shifts','bulk','invoice','annual','manual','settings','admin','qa'];
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',ids[i]===t));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
@@ -902,6 +978,7 @@ function switchTab(t){
   if(t==='annual')renderAnnual();
   if(t==='home')renderHome();
   if(t==='admin')renderAdminUserList();
+  if(t==='qa')renderQAList();
 }
 
 function showFlash(id,txt,ok){
@@ -1266,8 +1343,10 @@ function calcMonthPay(yr,mo){
 function generateInvoice(){
   const mv=document.getElementById('inv-month').value;if(!mv)return;
   const[yr,mo]=mv.split('-').map(Number);
+  const includeNormal=document.getElementById('inv-include-normal')?.checked||false;
   const sortFn=(a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1;
   const inMonth=shifts.filter(s=>{const d=new Date(s.date);return d.getFullYear()===yr&&d.getMonth()+1===mo;}).sort(sortFn);
+  const normalShifts =inMonth.filter(s=>s.type==='normal'&&!s.closed);
   const campShifts   =inMonth.filter(s=>s.type==='camp'&&!s.closed);
   const trainingShifts=inMonth.filter(s=>s.type==='training'&&!s.closed);
   const devShifts    =inMonth.filter(s=>s.type==='dev'&&!s.closed);
@@ -1275,9 +1354,15 @@ function generateInvoice(){
   const mtgShifts    =inMonth.filter(s=>s.type==='mtg'&&!s.closed);
   const closedShifts =inMonth.filter(s=>(s.type==='normal'||s.type==='camp')&&s.closed);
   let lines=[];
+  // 通常クラス（チェックONの場合のみ）
+  if(includeNormal&&normalShifts.length){
+    lines.push('講師業務通常');
+    normalShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}${memo}`);});
+    lines.push('');
+  }
   if(campShifts.length){
     lines.push('講師業務キャンプ');
-    campShifts.forEach(s=>{const d=new Date(s.date);lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}`);});
+    campShifts.forEach(s=>{const d=new Date(s.date);const memo=s.memo?' '+s.memo:'';lines.push(`${d.getMonth()+1}/${d.getDate()} ${s.start}${memo}`);});
     lines.push('');
   }
   const hasOuter=trainingShifts.length||devShifts.length||snsShifts.length||mtgShifts.length||closedShifts.length;
@@ -1554,6 +1639,435 @@ async function deleteUser(email, name) {
   else alert('削除に失敗しました');
 }
 
+
+
+// ── Q&A管理（Firebase対応） ──
+async function loadQAFromFirebase() {
+  if(typeof window.fetchQAList !== 'function') return;
+  const fbQA = await window.fetchQAList();
+  if(fbQA.length) {
+    // FirebaseのQ&AをマージしてデフォルトQ&Aより優先
+    const fbKeywords = fbQA.flatMap(q=>q.keywords);
+    const filteredDefault = qaList.filter(q=>!q.keywords.some(k=>fbKeywords.includes(k)));
+    qaList = [...fbQA, ...filteredDefault];
+  }
+}
+
+async function renderQAList() {
+  const el=document.getElementById('qa-list');
+  if(!el)return;
+  el.innerHTML='<p style="font-size:13px;color:var(--text2)">読み込み中...</p>';
+  await loadQAFromFirebase();
+  const myRole=window._currentUser?.role||'';
+  const canEdit=['admin','operator','ul'].includes(myRole);
+  const addBtn=document.getElementById('qa-add-btn');
+  if(addBtn)addBtn.style.display=canEdit?'':'none';
+  if(!qaList.length){el.innerHTML='<p style="font-size:13px;color:var(--text2)">Q&Aがありません</p>';return;}
+  el.innerHTML=qaList.map((qa,i)=>{
+    const isFirebase=!!qa.id;
+    return`<div style="padding:10px 0;border-bottom:.5px solid var(--border)">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:13px;font-weight:500">🔑 ${qa.keywords.join('・')}</span>
+            ${isFirebase?'<span style="font-size:10px;padding:1px 6px;border-radius:20px;background:var(--success-bg);color:var(--success-text)">Firebase</span>':'<span style="font-size:10px;padding:1px 6px;border-radius:20px;background:var(--bg3);color:var(--text3)">デフォルト</span>'}
+          </div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.6">${qa.answer}</div>
+        </div>
+        ${canEdit&&isFirebase?`<div style="display:flex;gap:4px;flex-shrink:0">
+          <button class="btn btn-sm btn-edit" onclick="openEditQAModal(${i})">編集</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteQA(${i})">削除</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openAddQAModal() {
+  const myRole=window._currentUser?.role||'';
+  if(!['admin','operator','ul'].includes(myRole)){alert('Q&Aを追加する権限がありません');return;}
+  document.getElementById('qa-modal-title').textContent='Q&Aを追加';
+  document.getElementById('qa-edit-index').value='';
+  document.getElementById('qa-edit-id').value='';
+  document.getElementById('qa-keywords').value='';
+  document.getElementById('qa-answer').value='';
+  document.getElementById('qa-msg').className='flash';
+  document.getElementById('qa-modal').classList.add('open');
+}
+function openEditQAModal(i) {
+  const myRole=window._currentUser?.role||'';
+  if(!['admin','operator','ul'].includes(myRole)){alert('Q&Aを編集する権限がありません');return;}
+  const qa=qaList[i];
+  document.getElementById('qa-modal-title').textContent='Q&Aを編集';
+  document.getElementById('qa-edit-index').value=i;
+  document.getElementById('qa-edit-id').value=qa.id||'';
+  document.getElementById('qa-keywords').value=qa.keywords.join(',');
+  document.getElementById('qa-answer').value=qa.answer;
+  document.getElementById('qa-msg').className='flash';
+  document.getElementById('qa-modal').classList.add('open');
+}
+function closeQAModal(){document.getElementById('qa-modal').classList.remove('open');}
+async function submitQA(){
+  const idx=document.getElementById('qa-edit-index').value;
+  const id=document.getElementById('qa-edit-id').value;
+  const keywordsRaw=document.getElementById('qa-keywords').value.trim();
+  const answer=document.getElementById('qa-answer').value.trim();
+  if(!keywordsRaw||!answer){showFlash('qa-msg','キーワードと回答を入力してください',false);return;}
+  const keywords=keywordsRaw.split(',').map(k=>k.trim()).filter(Boolean);
+  let ok=false;
+  if(id){
+    ok=await window.updateQAItem(id,keywords,answer);
+  }else{
+    ok=await window.addQAItem(keywords,answer);
+  }
+  if(ok){
+    showFlash('qa-msg','保存しました',true);
+    setTimeout(()=>{closeQAModal();renderQAList();},800);
+  }else{
+    showFlash('qa-msg','保存に失敗しました',false);
+  }
+}
+async function deleteQA(i){
+  const qa=qaList[i];
+  if(!qa.id){alert('デフォルトQ&Aは削除できません');return;}
+  if(!confirm('このQ&Aを削除しますか？'))return;
+  const ok=await window.deleteQAItem(qa.id);
+  if(ok)renderQAList();
+  else alert('削除に失敗しました');
+}
+
+// ── チャットボット ──
+let qaList = [
+  { keywords:['請求書','作り方','生成','コピー'], answer:'請求書タブから対象月を選んで「生成」をタップするとテキストが自動作成されます。「コピー」で内容をコピーできます。通常クラスを含めるかどうかはチェックボックスで選択できます。' },
+  { keywords:['シフト','登録','追加','入力'], answer:'シフトタブから業務種別・日付・開始〜終了時刻を入力して「＋追加」をタップします。ホーム画面の「＋この日にシフトを追加」からも登録できます。' },
+  { keywords:['一括','まとめて','月別'], answer:'一括タブから対象年月・時刻を入力し、週と曜日を選んで「一括登録する」をタップします。5週目が存在しない月は自動スキップされます。' },
+  { keywords:['クローズ','閉じ','来なかった','生徒'], answer:'シフト一覧の授業の「クローズ」ボタンをタップすると、その他MTG 15分として自動計算されます。間違えた場合は「解除」で戻せます。' },
+  { keywords:['カレンダー','google','同期','連携'], answer:'Googleアカウントでログインするとシフト追加時に自動でGoogleカレンダーに登録されます。授業は15分前、講師外業務は10分前に通知が届きます。' },
+  { keywords:['ログイン','サインイン','ログアウト','セッション'], answer:'セッションは約1時間で自動終了します。ログアウトは設定タブから行えます。再ログイン後もデータは保持されています。' },
+  { keywords:['収支','年間','目標','振込'], answer:'収支タブで年間の収支を管理できます。給与は翌月25日払いのため、集計期間は前年12月〜当年11月です。各月の振込額を手動で入力してください。' },
+  { keywords:['時給','単価','設定','変更'], answer:'設定タブから各業務の時給・コマ単価を変更できます。昇給があった場合は「期間別時給履歴」に登録すると過去の月にも正しい金額が適用されます。' },
+  { keywords:['データ','消えた','バックアップ','引き継ぎ'], answer:'設定タブの「エクスポート」でデータをJSONファイルとして保存できます。同じGoogleアカウントで再ログインするとクラウドから復元されます。' },
+  { keywords:['編集','修正','変更','時間'], answer:'講師外業務（研修・開発・MTG・SNS）はシフト一覧の「編集」ボタンから時間・メモを変更できます。変更するとGoogleカレンダーも自動更新されます。' },
+];
+
+const CHAT_TREE = {
+  '📅 シフト': {
+    '登録したい': 'シフトタブから業務種別・日付・時刻を入力して「＋追加」をタップします。ホーム画面から「＋この日にシフトを追加」でも登録できます。',
+    '編集・変更したい': '講師外業務（研修・開発・MTG・SNS）はシフト一覧の「編集」ボタンから変更できます。Googleカレンダーも自動更新されます。',
+    '削除したい': 'シフト一覧の「削除」ボタンをタップします。Googleカレンダーのイベントも自動削除されます。',
+    '一括登録したい': '一括タブから年月・時刻を入力し、週と曜日を選んで「一括登録する」をタップします。5週目がない月は自動スキップされます。',
+    '生徒が来なかった（クローズ）': '生徒が来なかった場合はシフト一覧の「クローズ」ボタンをタップしてください。その授業はその他MTG 15分として自動計算され、請求書にも「授業クローズ 15分」として記載されます。間違えた場合は「解除」で元に戻せます。',
+    '日またぎシフト': '終了時刻が開始より早い場合（例：23:00〜03:00）、追加ボタンを押すと確認ポップアップが出ます。OKで翌日として正しく計算・カレンダー登録されます。',
+  },
+  '📄 請求書': {
+    '作り方・生成方法': '請求書タブで対象月を選んで「生成」→「コピー」をタップします。テキストがクリップボードにコピーされます。',
+    '通常クラスを含めたい': '「通常クラスも含める」チェックボックスをONにすると「講師業務通常」セクションが追加されます。デフォルトはOFFです。',
+    '何が掲載される？': 'キャンプクラス・研修業務・教材開発・その他MTG・SNSマーケティング・授業クローズが含まれます。通常クラスはデフォルト非掲載です。',
+  },
+  '💰 収支': {
+    '振込額の入力方法': '収支タブの月別詳細で各月の入力欄に振り込まれた金額を入力してください。自動保存されます。',
+    '年間目標の設定': '収支タブの「年間目標額」欄に目標金額を入力すると達成率バーが表示されます。',
+    '集計期間について': '給与は翌月25日払いのため、集計期間は前年12月〜当年11月の労働分に対応しています。',
+  },
+  '⚙️ 設定': {
+    '時給・単価の変更': '設定タブから各業務の時給・コマ単価を変更できます。変更後は自動保存されます。',
+    '昇給があった場合': '設定タブの「期間別時給履歴」に開始月と新単価を登録すると、過去の月にも正しい金額が適用されます。',
+    'データのバックアップ': '設定タブの「エクスポート」でJSONファイルとして保存できます。機種変更時は「インポート」で復元できます。',
+  },
+  '🔐 ログイン': {
+    'ログインできない': 'Googleアカウントがアプリに登録されているか確認してください。未登録の場合は管理者にお問い合わせください。',
+    'セッションについて': 'セッションは約1時間で自動終了します。残り5分で画面上部に警告が表示されます。終了後はログイン画面に移動しますが、データは保持されています。',
+    '別端末で使いたい': '同じGoogleアカウントでログインすれば、どの端末からでもデータが同期されます。',
+  },
+};
+
+// チャットボットUIをJSで生成
+function initChatbot() {
+  // ダークモード判定
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const bg     = isDark ? '#1e1e1e' : '#ffffff';
+  const bg2    = isDark ? '#2a2a2a' : '#f5f5f5';
+  const text   = isDark ? '#f0f0f0' : '#111111';
+  const text2  = isDark ? '#aaaaaa' : '#666666';
+  const border = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+  const accent = isDark ? '#f0f0f0' : '#111111';
+  const accentText = isDark ? '#111111' : '#ffffff';
+
+  // FABボタン
+  const fab = document.createElement('button');
+  fab.id = 'chat-fab';
+  fab.setAttribute('aria-label','よくある質問');
+  fab.innerHTML = '🤖';
+  Object.assign(fab.style, {
+    position:'fixed', bottom:'20px', right:'20px',
+    width:'54px', height:'54px', borderRadius:'50%',
+    background:accent, color:accentText,
+    border:'none', cursor:'pointer',
+    fontSize:'26px', zIndex:'900',
+    boxShadow:'0 4px 12px rgba(0,0,0,0.25)',
+    display:'flex', alignItems:'center', justifyContent:'center',
+    transition:'transform 0.2s, box-shadow 0.2s',
+    fontFamily:'inherit',
+  });
+  fab.addEventListener('mouseenter', () => { fab.style.transform='scale(1.08)'; fab.style.boxShadow='0 6px 18px rgba(0,0,0,0.3)'; });
+  fab.addEventListener('mouseleave', () => { fab.style.transform='scale(1)'; fab.style.boxShadow='0 4px 12px rgba(0,0,0,0.25)'; });
+  fab.addEventListener('click', toggleChat);
+  document.body.appendChild(fab);
+
+  // チャットウィンドウ
+  const win = document.createElement('div');
+  win.id = 'chat-win';
+  Object.assign(win.style, {
+    position:'fixed', bottom:'84px', right:'20px',
+    width:'300px', height:'0px',
+    background:bg, border:`0.5px solid ${border}`,
+    borderRadius:'14px', zIndex:'900',
+    display:'flex', flexDirection:'column',
+    overflow:'hidden', boxShadow:'0 8px 30px rgba(0,0,0,0.18)',
+    transition:'height 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s',
+    opacity:'0', pointerEvents:'none',
+  });
+
+  // ヘッダー
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    background:accent, color:accentText,
+    padding:'12px 16px', display:'flex',
+    alignItems:'center', justifyContent:'space-between',
+    flexShrink:'0',
+  });
+  header.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:20px">🤖</span>
+      <div>
+        <div style="font-size:13px;font-weight:600">よくある質問</div>
+        <div style="font-size:10px;opacity:0.8">お気軽にどうぞ！</div>
+      </div>
+    </div>
+    <button id="chat-close" style="background:none;border:none;color:${accentText};cursor:pointer;font-size:20px;line-height:1;padding:2px 4px;opacity:0.8">✕</button>
+  `;
+  win.appendChild(header);
+
+  // メッセージエリア
+  const msgs = document.createElement('div');
+  msgs.id = 'chat-msgs';
+  Object.assign(msgs.style, {
+    flex:'1', overflowY:'auto', padding:'12px',
+    display:'flex', flexDirection:'column', gap:'8px',
+    minHeight:'0', background:bg,
+  });
+  win.appendChild(msgs);
+
+  // カテゴリエリア
+  const cats = document.createElement('div');
+  cats.id = 'chat-cats';
+  Object.assign(cats.style, {
+    padding:'8px 10px', display:'flex',
+    flexWrap:'wrap', gap:'5px',
+    borderTop:`0.5px solid ${border}`, flexShrink:'0',
+    background:bg,
+  });
+  win.appendChild(cats);
+
+  // 入力エリア
+  const inputArea = document.createElement('div');
+  Object.assign(inputArea.style, {
+    padding:'8px', borderTop:`0.5px solid ${border}`,
+    display:'flex', gap:'6px', flexShrink:'0', background:bg,
+  });
+  const inp = document.createElement('input');
+  inp.id = 'chat-input';
+  inp.placeholder = '質問を入力...';
+  Object.assign(inp.style, {
+    flex:'1', fontSize:'13px', padding:'7px 10px',
+    border:`0.5px solid ${border}`, borderRadius:'6px',
+    background:bg2, color:text, fontFamily:'inherit',
+    outline:'none',
+  });
+  inp.addEventListener('keydown', e => { if(e.key==='Enter') sendChat(); });
+  const sendBtn = document.createElement('button');
+  sendBtn.textContent = '送信';
+  Object.assign(sendBtn.style, {
+    padding:'7px 12px', borderRadius:'6px', border:'none',
+    background:accent, color:accentText, cursor:'pointer',
+    fontSize:'13px', fontWeight:'500', fontFamily:'inherit',
+  });
+  sendBtn.addEventListener('click', sendChat);
+  inputArea.appendChild(inp);
+  inputArea.appendChild(sendBtn);
+  win.appendChild(inputArea);
+
+  document.body.appendChild(win);
+
+  // 閉じるボタン
+  document.getElementById('chat-close').addEventListener('click', toggleChat);
+
+  // カテゴリボタン描画
+  renderChatCategories();
+}
+
+function toggleChat() {
+  const win = document.getElementById('chat-win');
+  const isOpen = win.style.height !== '0px' && win.style.height !== '';
+  if (isOpen) {
+    // 閉じる
+    win.style.height = '0px';
+    win.style.opacity = '0';
+    win.style.pointerEvents = 'none';
+  } else {
+    // 開く
+    win.style.pointerEvents = 'auto';
+    win.style.opacity = '1';
+    win.style.height = '420px';
+    const msgs = document.getElementById('chat-msgs');
+    if (msgs && msgs.children.length === 0) {
+      addChatMsg('bot', 'こんにちは！😊 操作についてのご質問はカテゴリから選ぶか、下の入力欄に直接入力してください。');
+    }
+    setTimeout(() => {
+      const inp = document.getElementById('chat-input');
+      if(inp) inp.focus();
+    }, 300);
+  }
+}
+
+function addChatMsg(type, text) {
+  const msgs = document.getElementById('chat-msgs');
+  if (!msgs) return;
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const bg2   = isDark ? '#2a2a2a' : '#f5f5f5';
+  const text1 = isDark ? '#f0f0f0' : '#111111';
+  const accent= isDark ? '#f0f0f0' : '#111111';
+  const accentText = isDark ? '#111111' : '#ffffff';
+  const el = document.createElement('div');
+  Object.assign(el.style, {
+    maxWidth:'84%', fontSize:'13px', padding:'8px 12px',
+    lineHeight:'1.6', wordBreak:'break-word',
+    borderRadius: type==='bot' ? '10px 10px 10px 2px' : '10px 10px 2px 10px',
+    background: type==='bot' ? bg2 : accent,
+    color: type==='bot' ? text1 : accentText,
+    alignSelf: type==='bot' ? 'flex-start' : 'flex-end',
+  });
+  el.textContent = text;
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderChatCategories() {
+  const cats = document.getElementById('chat-cats');
+  if (!cats) return;
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const bg    = isDark ? '#1e1e1e' : '#ffffff';
+  const bg2   = isDark ? '#2a2a2a' : '#f5f5f5';
+  const text2 = isDark ? '#aaaaaa' : '#666666';
+  const border= isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+  cats.innerHTML = '';
+  Object.keys(CHAT_TREE).forEach(cat => {
+    const btn = document.createElement('button');
+    btn.textContent = cat;
+    Object.assign(btn.style, {
+      fontSize:'12px', padding:'5px 11px',
+      borderRadius:'20px', border:'0.5px solid '+border,
+      background:bg, color:text2, cursor:'pointer',
+      fontFamily:'inherit', transition:'background 0.1s',
+    });
+    btn.addEventListener('click', () => renderChatSubCategories(cat));
+    cats.appendChild(btn);
+  });
+}
+
+function renderChatSubCategories(cat) {
+  const cats = document.getElementById('chat-cats');
+  if (!cats) return;
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const bg    = isDark ? '#1e1e1e' : '#ffffff';
+  const bg2   = isDark ? '#2a2a2a' : '#f5f5f5';
+  const text2 = isDark ? '#aaaaaa' : '#666666';
+  const border= isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+  addChatMsg('user', cat);
+  cats.innerHTML = '';
+  setTimeout(() => {
+    addChatMsg('bot', 'どのようなことでしょうか？');
+    cats.innerHTML = '';
+    // 戻るボタン
+    const back = document.createElement('button');
+    back.textContent = '← 戻る';
+    Object.assign(back.style, {
+      fontSize:'11px', padding:'3px 10px', borderRadius:'20px',
+      border:'0.5px solid '+border, background:bg2, color:text2,
+      cursor:'pointer', fontFamily:'inherit', width:'100%',
+      textAlign:'left', marginBottom:'4px',
+    });
+    back.addEventListener('click', () => renderChatCategories());
+    cats.appendChild(back);
+    // サブカテゴリ
+    Object.keys(CHAT_TREE[cat]).forEach(sub => {
+      const btn = document.createElement('button');
+      btn.textContent = sub;
+      Object.assign(btn.style, {
+        fontSize:'12px', padding:'5px 10px', borderRadius:'20px',
+        border:'0.5px solid '+border, background:bg, color:text2,
+        cursor:'pointer', fontFamily:'inherit',
+      });
+      btn.addEventListener('click', () => {
+        cats.innerHTML = '';
+        addChatMsg('user', sub);
+        setTimeout(() => {
+          addChatMsg('bot', CHAT_TREE[cat][sub]);
+          // 回答後のボタン
+          const b1 = document.createElement('button');
+          b1.textContent = '← '+cat+' に戻る';
+          const b2 = document.createElement('button');
+          b2.textContent = '🏠 最初に戻る';
+          [b1, b2].forEach(b => {
+            Object.assign(b.style, {
+              fontSize:'11px', padding:'3px 10px', borderRadius:'20px',
+              border:'0.5px solid '+border, background:bg2, color:text2,
+              cursor:'pointer', fontFamily:'inherit',
+            });
+          });
+          b1.addEventListener('click', () => renderChatSubCategories(cat));
+          b2.addEventListener('click', () => renderChatCategories());
+          cats.appendChild(b1);
+          cats.appendChild(b2);
+        }, 300);
+      });
+      cats.appendChild(btn);
+    });
+  }, 200);
+}
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  document.getElementById('chat-cats').innerHTML = '';
+  addChatMsg('user', text);
+  setTimeout(() => {
+    const answer = findChatAnswer(text);
+    addChatMsg('bot', answer);
+  }, 300);
+}
+
+async function loadQAFromFirebase() {
+  if(typeof window.fetchQAList !== 'function') return;
+  const fbQA = await window.fetchQAList();
+  if(fbQA.length) {
+    const fbKeywords = fbQA.flatMap(q=>q.keywords);
+    const filteredDefault = qaList.filter(q=>!q.keywords.some(k=>fbKeywords.includes(k)));
+    qaList = [...fbQA, ...filteredDefault];
+  }
+}
+
+function findChatAnswer(text) {
+  const lower = text.toLowerCase();
+  for (const qa of qaList) {
+    if (qa.keywords.some(k => lower.includes(k))) return qa.answer;
+  }
+  return 'ご質問の内容が見つかりませんでした。担当者にお問い合わせいただくか、別のキーワードでお試しください。';
+}
+
 function init(){
   loadLocal();
   document.getElementById('new-date').value=toLocalDateStr(new Date());
@@ -1561,6 +2075,7 @@ function init(){
   document.getElementById('bulk-month').value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
   ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
   renderAll();buildWeekGrid();
+  initChatbot();
 }
 init();
 
