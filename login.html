@@ -30,6 +30,13 @@
     window.location.href = '/';
   }
 
+  // URLパラメータでエラー表示
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('error') === 'not_allowed') {
+    document.getElementById('login-error').textContent = 'このアカウントはアプリの利用が許可されていません。管理者にお問い合わせください。';
+    document.getElementById('login-error').style.display = 'block';
+  }
+
   window.doLogin = async function() {
     const btn = document.getElementById('login-btn');
     btn.disabled = true;

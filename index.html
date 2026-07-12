@@ -27,7 +27,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
   import { getAuth, onAuthStateChanged, signOut }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-  import { getFirestore, doc, setDoc, onSnapshot }
+  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 
   const firebaseConfig = {
@@ -95,7 +95,7 @@
     const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 60000));
     if (state === 'synced') {
       bar.style.display='flex';bar.style.background='var(--success-bg)';bar.style.color='var(--success-text)';bar.style.borderBottom='0.5px solid var(--success-text)';
-      const name = auth.currentUser?.displayName || auth.currentUser?.email || '';
+      const name = window._displayName || auth.currentUser?.displayName || auth.currentUser?.email || '';
       bar.innerHTML=`✓ 同期済み &nbsp;<strong>${name}</strong><span style="margin-left:auto;font-size:11px">残り${remaining}分 | ${new Date().toLocaleTimeString('ja-JP')}</span>`;
     } else if (state === 'syncing') {
       bar.style.display='flex';bar.style.background='var(--warning-bg)';bar.style.color='var(--warning-text)';bar.style.borderBottom='0.5px solid var(--close-color)';
@@ -135,11 +135,95 @@
     });
   }
 
+  // 役職定義
+  window.ROLES = {
+    admin:      { label:'管理者',             level:6 },
+    operator:   { label:'オペレーター',        level:5 },
+    ul:         { label:'ユニットリーダー',     level:4 },
+    sub_ul:     { label:'準ユニットリーダー',   level:3 },
+    instructor: { label:'講師',               level:2 },
+    trainee:    { label:'研修中',             level:1 },
+  };
+  window._currentUser = null; // allowedUsersのデータ
+
+  // allowedUsersからユーザー情報取得
+  async function fetchAllowedUser(email) {
+    try {
+      const snap = await getDoc(doc(db, 'allowedUsers', email));
+      if (snap.exists()) return snap.data();
+      return null;
+    } catch(e) { console.warn('fetchAllowedUser error', e); return null; }
+  }
+
+  // allowedUsers全件取得（管理者用）
+  window.fetchAllUsers = async function() {
+    try {
+      const snap = await getDocs(collection(db, 'allowedUsers'));
+      return snap.docs.map(d => ({ email: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchAllUsers error', e); return []; }
+  };
+
+  // ユーザー追加
+  window.addAllowedUser = async function(email, name, role) {
+    try {
+      await setDoc(doc(db, 'allowedUsers', email), {
+        name, role, addedAt: new Date().toISOString().slice(0,10),
+        addedBy: auth.currentUser?.email || ''
+      });
+      return true;
+    } catch(e) { console.warn('addAllowedUser error', e); return false; }
+  };
+
+  // ユーザー削除
+  window.removeAllowedUser = async function(email) {
+    try {
+      await deleteDoc(doc(db, 'allowedUsers', email));
+      return true;
+    } catch(e) { console.warn('removeAllowedUser error', e); return false; }
+  };
+
+  // 役職変更
+  window.updateUserRole = async function(email, newRole) {
+    try {
+      const snap = await getDoc(doc(db, 'allowedUsers', email));
+      if (!snap.exists()) return false;
+      await setDoc(doc(db, 'allowedUsers', email), { ...snap.data(), role: newRole });
+      return true;
+    } catch(e) { console.warn('updateUserRole error', e); return false; }
+  };
+
   // 認証状態監視
-  onAuthStateChanged(auth, user => {
+  onAuthStateChanged(auth, async user => {
     const userName = document.getElementById('auth-user-name');
     if (user) {
-      if (userName) userName.textContent = user.displayName || user.email;
+      // allowedUsersチェック
+      const allowedData = await fetchAllowedUser(user.email);
+      if (!allowedData) {
+        // 未登録ユーザー → ログアウトしてlogin.htmlへ
+        await signOut(auth);
+        localStorage.removeItem('gcal_token');
+        localStorage.removeItem('gcal_token_expires');
+        window.location.href = '/login.html?error=not_allowed';
+        return;
+      }
+      // ユーザー情報を保存
+      window._currentUser = { ...allowedData, uid: user.uid, email: user.email };
+      // 表示名をallowedUsersのnameから取得
+      const displayName = allowedData.name || user.displayName || user.email;
+      if (userName) userName.textContent = displayName;
+      // 役職バッジを設定タブに表示
+      const roleEl = document.getElementById('user-role-badge');
+      if (roleEl) {
+        const roleLabel = window.ROLES[allowedData.role]?.label || allowedData.role;
+        roleEl.textContent = roleLabel;
+      }
+      // 管理者タブの表示制御
+      const adminTab = document.getElementById('tab-btn-admin');
+      if (adminTab) {
+        const canSeeAdmin = ['admin','operator','ul'].includes(allowedData.role);
+        adminTab.style.display = canSeeAdmin ? '' : 'none';
+      }
+
       // 別アカウント切り替え検知
       const prevUid = localStorage.getItem('gcal_uid');
       if (prevUid && prevUid !== user.uid) {
@@ -150,8 +234,9 @@
       window._gcalToken = localStorage.getItem('gcal_token');
       startSync(user);
       startExpiryWatch();
+      // ステータスバーに登録名を表示
+      window._displayName = displayName;
     } else {
-      // Firebaseセッションなし → ログインページへ
       window.location.href = '/login.html';
     }
   });
@@ -170,7 +255,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .version-badge{font-size:11px;color:var(--text3);background:var(--bg3);padding:2px 8px;border-radius:20px}
 .tabs{max-width:720px;margin:0 auto;display:flex;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex:1;min-width:48px;padding:10px 2px;font-size:11px;text-align:center;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab{flex:1 0 auto;min-width:64px;padding:10px 8px;font-size:11px;text-align:center;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
 .tab.active{color:var(--text);border-bottom-color:var(--text);font-weight:500}
 .content{max-width:720px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px}
 .panel{display:none}
@@ -272,6 +357,56 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <button onclick="location.reload()">更新する</button>
 </div>
 
+<!-- ユーザー追加モーダル -->
+<div class="modal-overlay" id="add-user-modal">
+  <div class="modal">
+    <h3>ユーザーを追加</h3>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>メールアドレス</label>
+      <input type="email" id="add-user-email" placeholder="user@gmail.com">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>表示名</label>
+      <input type="text" id="add-user-name" placeholder="例: 山田太郎">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>役職</label>
+      <select id="add-user-role">
+        <option value="trainee">研修中</option>
+        <option value="instructor">講師</option>
+        <option value="sub_ul">準ユニットリーダー</option>
+        <option value="ul">ユニットリーダー</option>
+        <option value="operator">オペレーター</option>
+        <option value="admin">管理者</option>
+      </select>
+    </div>
+    <div class="flash" id="add-user-msg"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddUserModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="submitAddUser()">追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 役職変更モーダル -->
+<div class="modal-overlay" id="edit-role-modal">
+  <div class="modal">
+    <h3>役職を変更</h3>
+    <input type="hidden" id="edit-role-email">
+    <p style="font-size:13px;color:var(--text2);margin-bottom:12px" id="edit-role-user-name"></p>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>新しい役職</label>
+      <select id="edit-role-select"></select>
+    </div>
+    <div class="flash" id="edit-role-msg"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEditRoleModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="submitEditRole()">変更</button>
+    </div>
+  </div>
+</div>
+
+
 <div class="modal-overlay" id="edit-modal">
   <div class="modal">
     <h3>シフトを編集</h3>
@@ -305,6 +440,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <button class="tab" onclick="switchTab('annual')">💰 収支</button>
       <button class="tab" onclick="switchTab('manual')">📖 使い方</button>
       <button class="tab" onclick="switchTab('settings')">⚙️ 設定</button>
+      <button class="tab" id="tab-btn-admin" onclick="switchTab('admin')" style="display:none">👥 管理</button>
     </div>
   </nav>
 </div>
@@ -587,7 +723,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div>
           <p style="font-size:13px;font-weight:500" id="auth-user-name"></p>
-          <p style="font-size:12px;color:var(--text2);margin-top:2px">Googleアカウントでログイン中</p>
+          <p style="font-size:12px;color:var(--text2);margin-top:2px">Googleアカウントでログイン中 &nbsp;<span id="user-role-badge" style="font-size:11px;padding:2px 8px;border-radius:20px;background:var(--bg3);color:var(--text2)"></span></p>
         </div>
         <button class="btn btn-sm btn-danger" onclick="doSignOut()">ログアウト</button>
       </div>
@@ -663,6 +799,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 </div>
 
+  <!-- 管理者タブ -->
+  <div id="tab-admin" class="panel">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="section-title" style="margin-bottom:0">ユーザー管理</div>
+        <button class="btn btn-primary btn-sm" onclick="openAddUserModal()">＋ ユーザー追加</button>
+      </div>
+      <div id="admin-user-list"><p style="font-size:13px;color:var(--text2)">読み込み中...</p></div>
+    </div>
+  </div>
+
+
 <footer style="max-width:720px;margin:0 auto;padding:24px 16px;text-align:center;font-size:12px;color:var(--text3);border-top:.5px solid var(--border)">
   <p style="margin-bottom:8px">ClassmallKids シフト・請求書管理 | りゅう先生</p>
   <p>
@@ -672,7 +820,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </footer>
 
 <script>
-const APP_VERSION='3.1.0';
+const APP_VERSION='3.1.1';
 document.getElementById('ver-badge').textContent='v'+APP_VERSION;
 document.getElementById('ver-display').textContent=APP_VERSION;
 
@@ -745,7 +893,7 @@ function getRatesForMonth(yrmo){
 }
 
 function switchTab(t){
-  const ids=['home','shifts','bulk','invoice','annual','manual','settings'];
+  const ids=['home','shifts','bulk','invoice','annual','manual','settings','admin'];
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',ids[i]===t));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
@@ -753,6 +901,7 @@ function switchTab(t){
   if(t==='bulk')buildWeekGrid();
   if(t==='annual')renderAnnual();
   if(t==='home')renderHome();
+  if(t==='admin')renderAdminUserList();
 }
 
 function showFlash(id,txt,ok){
@@ -1260,6 +1409,130 @@ function clearAll(){
     shifts=[];rateHistory=[];payments={};annualGoals={};
     save();renderAll();
   }
+}
+
+
+// ── 管理者画面 ──
+const ROLE_ORDER = ['admin','operator','ul','sub_ul','instructor','trainee'];
+
+// 自分が変更できる役職を返す
+function getEditableRoles(myRole) {
+  if (myRole === 'admin' || myRole === 'operator') {
+    return ROLE_ORDER; // 全役職変更可能
+  } else if (myRole === 'ul') {
+    return ['ul','sub_ul','instructor','trainee']; // ul以下
+  }
+  return [];
+}
+
+// ユーザー一覧を描画
+async function renderAdminUserList() {
+  const el = document.getElementById('admin-user-list');
+  if (!el) return;
+  el.innerHTML = '<p style="font-size:13px;color:var(--text2)">読み込み中...</p>';
+  const users = await window.fetchAllUsers();
+  const myRole = window._currentUser?.role || '';
+  const editableRoles = getEditableRoles(myRole);
+  const canAddDelete = ['admin','operator'].includes(myRole);
+
+  if (!users.length) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--text2)">ユーザーがいません</p>';
+    return;
+  }
+
+  // 役職レベル順にソート
+  users.sort((a,b) => (window.ROLES[b.role]?.level||0) - (window.ROLES[a.role]?.level||0));
+
+  el.innerHTML = users.map(u => {
+    const roleLabel = window.ROLES[u.role]?.label || u.role;
+    const canEditThisUser = editableRoles.includes(u.role) && u.email !== window._currentUser?.email;
+    const roleBg = {
+      admin:'#fdecea', operator:'#fff8e1', ul:'#edfaef',
+      sub_ul:'#e8f4fd', instructor:'#f5f5f5', trainee:'#fafafa'
+    }[u.role] || '#f5f5f5';
+    const roleColor = {
+      admin:'#c0392b', operator:'#b45309', ul:'#1a7a32',
+      sub_ul:'#185FA5', instructor:'#444', trainee:'#888'
+    }[u.role] || '#444';
+
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500">${u.name||'(名前未設定)'}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${u.email}</div>
+      </div>
+      <span style="font-size:11px;padding:2px 10px;border-radius:20px;background:${roleBg};color:${roleColor};font-weight:500;white-space:nowrap">${roleLabel}</span>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        ${canEditThisUser ? `<button class="btn btn-sm" onclick="openEditRoleModal('${u.email}','${u.name||''}','${u.role}')">役職変更</button>` : ''}
+        ${canAddDelete && u.email !== window._currentUser?.email ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.email}','${u.name||u.email}')">削除</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ユーザー追加モーダル
+function openAddUserModal() {
+  document.getElementById('add-user-email').value = '';
+  document.getElementById('add-user-name').value = '';
+  document.getElementById('add-user-role').value = 'instructor';
+  document.getElementById('add-user-msg').className = 'flash';
+  // 自分の役職に応じて選択肢を制限
+  const myRole = window._currentUser?.role || '';
+  const editableRoles = getEditableRoles(myRole);
+  const sel = document.getElementById('add-user-role');
+  Array.from(sel.options).forEach(opt => {
+    opt.style.display = editableRoles.includes(opt.value) ? '' : 'none';
+  });
+  document.getElementById('add-user-modal').classList.add('open');
+}
+function closeAddUserModal() { document.getElementById('add-user-modal').classList.remove('open'); }
+async function submitAddUser() {
+  const email = document.getElementById('add-user-email').value.trim();
+  const name  = document.getElementById('add-user-name').value.trim();
+  const role  = document.getElementById('add-user-role').value;
+  if (!email || !name) { showFlash('add-user-msg','メールアドレスと名前を入力してください',false); return; }
+  if (!email.includes('@')) { showFlash('add-user-msg','正しいメールアドレスを入力してください',false); return; }
+  const ok = await window.addAllowedUser(email, name, role);
+  if (ok) {
+    showFlash('add-user-msg','追加しました',true);
+    setTimeout(() => { closeAddUserModal(); renderAdminUserList(); }, 1000);
+  } else {
+    showFlash('add-user-msg','追加に失敗しました',false);
+  }
+}
+
+// 役職変更モーダル
+function openEditRoleModal(email, name, currentRole) {
+  document.getElementById('edit-role-email').value = email;
+  document.getElementById('edit-role-user-name').textContent = `${name} (${email})`;
+  document.getElementById('edit-role-msg').className = 'flash';
+  // 選択可能な役職を設定
+  const myRole = window._currentUser?.role || '';
+  const editableRoles = getEditableRoles(myRole);
+  const sel = document.getElementById('edit-role-select');
+  sel.innerHTML = editableRoles.map(r =>
+    `<option value="${r}" ${r===currentRole?'selected':''}>${window.ROLES[r]?.label||r}</option>`
+  ).join('');
+  document.getElementById('edit-role-modal').classList.add('open');
+}
+function closeEditRoleModal() { document.getElementById('edit-role-modal').classList.remove('open'); }
+async function submitEditRole() {
+  const email   = document.getElementById('edit-role-email').value;
+  const newRole = document.getElementById('edit-role-select').value;
+  const ok = await window.updateUserRole(email, newRole);
+  if (ok) {
+    showFlash('edit-role-msg','役職を変更しました',true);
+    setTimeout(() => { closeEditRoleModal(); renderAdminUserList(); }, 1000);
+  } else {
+    showFlash('edit-role-msg','変更に失敗しました',false);
+  }
+}
+
+// ユーザー削除
+async function deleteUser(email, name) {
+  if (!confirm(`${name} を削除しますか？\nこの操作は取り消せません。`)) return;
+  const ok = await window.removeAllowedUser(email);
+  if (ok) renderAdminUserList();
+  else alert('削除に失敗しました');
 }
 
 function init(){
