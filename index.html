@@ -330,6 +330,36 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         </div>
       </div>
       <div id="today-shifts"></div>
+      <button class="btn btn-primary" id="home-add-btn" onclick="toggleHomeAddForm(true)" style="width:100%;justify-content:center;margin-top:10px">＋ この日にシフトを追加</button>
+      <div id="home-add-form" style="display:none;margin-top:12px;border-top:0.5px solid var(--border);padding-top:12px">
+        <div class="form-grid" style="margin-bottom:8px">
+          <div class="form-group">
+            <label>業務種別</label>
+            <select id="home-new-type">
+              <option value="normal">通常クラス</option>
+              <option value="camp">キャンプクラス</option>
+              <option value="training">研修業務</option>
+              <option value="dev">教材開発</option>
+              <option value="mtg">その他MTG</option>
+              <option value="sns">SNSマーケティング</option>
+            </select>
+          </div>
+          <div class="form-group"><label>日付</label><input type="date" id="home-new-date" readonly style="background:var(--bg2);color:var(--text2)"></div>
+        </div>
+        <div class="form-grid" style="margin-bottom:8px">
+          <div class="form-group"><label>開始</label><input type="time" id="home-new-start"></div>
+          <div class="form-group"><label>終了</label><input type="time" id="home-new-end"></div>
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>担当コース（任意）</label>
+          <input type="text" id="home-new-memo" placeholder="例: ジュニア / スタンダード">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="addShiftFromHome()" style="flex:1;justify-content:center">＋ 追加</button>
+          <button class="btn" onclick="toggleHomeAddForm(false)" style="justify-content:center">キャンセル</button>
+        </div>
+        <div class="flash" id="home-add-msg"></div>
+      </div>
     </div>
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -764,6 +794,12 @@ function renderHome(){
 function renderHomeShifts(){
   const picker=document.getElementById('home-date-picker');
   if(!picker)return;
+  // フォームが開いている場合は日付を更新
+  const form=document.getElementById('home-add-form');
+  if(form&&form.style.display!=='none'){
+    const dateInput=document.getElementById('home-new-date');
+    if(dateInput) dateInput.value=picker.value||toLocalDateStr(new Date());
+  }
   const dateStr=picker.value||toLocalDateStr(new Date());
   const dt=new Date(dateStr+'T00:00:00');
   const days=['日','月','火','水','木','金','土'];
@@ -797,6 +833,47 @@ function renderHomeShifts(){
       </div>`;
     }).join("");
   }
+}
+
+function toggleHomeAddForm(show){
+  const form=document.getElementById('home-add-form');
+  const btn=document.getElementById('home-add-btn');
+  if(show){
+    form.style.display='block';
+    btn.style.display='none';
+    // 日付ピッカーの日付をフォームに反映
+    const picker=document.getElementById('home-date-picker');
+    const dateInput=document.getElementById('home-new-date');
+    if(picker&&dateInput) dateInput.value=picker.value||toLocalDateStr(new Date());
+    // 前回の入力をクリア
+    document.getElementById('home-new-start').value='';
+    document.getElementById('home-new-end').value='';
+    document.getElementById('home-new-memo').value='';
+    document.getElementById('home-add-msg').className='flash';
+  } else {
+    form.style.display='none';
+    btn.style.display='';
+  }
+}
+
+function addShiftFromHome(){
+  const type=document.getElementById('home-new-type').value;
+  const date=document.getElementById('home-new-date').value;
+  const start=document.getElementById('home-new-start').value;
+  const end=document.getElementById('home-new-end').value;
+  const memo=document.getElementById('home-new-memo').value;
+  if(!date||!start||!end){showFlash('home-add-msg','時刻を入力してください',false);return;}
+  if(start>=end){
+    const ok=confirm('開始時刻（'+start+'）が終了時刻（'+end+'）より遅くなっています。\n日をまたいで登録しますか？\n\n※ 終了時刻は翌日として計算されます');
+    if(!ok)return;
+  }
+  const shift={id:Date.now()+Math.random(),type,date,start,end,memo,closed:false,gcalEventId:null,overnight:start>=end};
+  shifts.push(shift);
+  save();checkConflicts();renderShifts();renderMetrics();renderHomeShifts();
+  showFlash('home-add-msg','追加しました',true);
+  if(window._gcalToken)syncToGcal(shift);
+  // フォームを閉じる
+  setTimeout(()=>toggleHomeAddForm(false),1000);
 }
 
 function homePrevDay(){
@@ -844,8 +921,11 @@ function addShift(){
   const end=document.getElementById('new-end').value;
   const memo=document.getElementById('new-memo').value;
   if(!date||!start||!end){showFlash('add-msg','日付・時刻を入力してください',false);return;}
-  if(start>=end){showFlash('add-msg','終了時刻は開始より後にしてください',false);return;}
-  const shift={id:Date.now()+Math.random(),type,date,start,end,memo,closed:false,gcalEventId:null};
+  if(start>=end){
+    const ok=confirm('開始時刻（'+start+'）が終了時刻（'+end+'）より遅くなっています。\n日をまたいで登録しますか？\n\n※ 終了時刻は翌日として計算されます');
+    if(!ok)return;
+  }
+  const shift={id:Date.now()+Math.random(),type,date,start,end,memo,closed:false,gcalEventId:null,overnight:start>=end};
   shifts.push(shift);
   save();checkConflicts();renderShifts();renderMetrics();renderHome();
   showFlash('add-msg','追加しました',true);
@@ -889,8 +969,11 @@ function deleteShift(id){
 }
 
 function durationH(s,e){
-  const[sh,sm]=s.split(':').map(Number);const[eh,em]=e.split(':').map(Number);
-  return((eh*60+em)-(sh*60+sm))/60;
+  const[sh,sm]=s.split(':').map(Number);
+  const[eh,em]=e.split(':').map(Number);
+  let diff=(eh*60+em)-(sh*60+sm);
+  if(diff<=0)diff+=24*60;
+  return diff/60;
 }
 
 function getConflictIds(){
@@ -922,7 +1005,7 @@ function renderShifts(){
     return`<div class="shift-item${isConflict?' has-conflict':''}">
       <div class="shift-dot" style="background:${s.closed?'#888':TYPE_COLOR[s.type]}"></div>
       <div class="shift-body">
-        <div class="shift-title">${s.date.slice(5).replace('-','/')} ${TYPE_LABEL[s.type]} ${closedBadge}${gcalBadge}${conflictBadge}</div>
+        <div class="shift-title">${s.date.slice(5).replace('-','/')} ${TYPE_LABEL[s.type]} ${closedBadge}${s.overnight?'<span style="font-size:11px;padding:2px 6px;border-radius:20px;background:var(--bg3);color:var(--text2)">日またぎ</span>':''}${gcalBadge}${conflictBadge}</div>
         <div class="shift-sub">${sub}</div>
       </div>
       <div class="shift-actions">${editBtn}${closeBtn}<button class="btn btn-sm btn-danger" onclick="deleteShift(${s.id})">削除</button></div>
@@ -1000,7 +1083,11 @@ function executeBulk(){
   const end=document.getElementById('bulk-end').value;
   const memo=document.getElementById('bulk-memo').value;
   if(!mv||!start||!end){showFlash('bulk-msg','年月・時刻を入力してください',false);return;}
-  if(start>=end){showFlash('bulk-msg','終了時刻は開始より後にしてください',false);return;}
+  let isOvernight=start>=end;
+  if(isOvernight){
+    const ok=confirm('開始時刻（'+start+'）が終了時刻（'+end+'）より遅くなっています。\n日をまたいで一括登録しますか？\n\n※ 終了時刻は翌日として計算されます');
+    if(!ok)return;
+  }
   const[yr,mo]=mv.split('-').map(Number);
   const sel=document.querySelectorAll('#week-grid .day-btn.on');
   if(!sel.length){showFlash('bulk-msg','曜日を選択してください',false);return;}
@@ -1123,12 +1210,18 @@ function renderRateHistory(){
 function syncToGcal(shift){
   if(!window._gcalToken)return;
   const isClass=!TYPE_HOURLY[shift.type];
+  let endDate=shift.date;
+  if(shift.overnight){
+    const d=new Date(shift.date+'T00:00:00');
+    d.setDate(d.getDate()+1);
+    endDate=toLocalDateStr(d);
+  }
   fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
     method:'POST',headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
     body:JSON.stringify({
       summary:TYPE_GCAL[shift.type]+(shift.memo?' '+shift.memo:''),
       start:{dateTime:`${shift.date}T${shift.start}:00`,timeZone:'Asia/Tokyo'},
-      end:{dateTime:`${shift.date}T${shift.end}:00`,timeZone:'Asia/Tokyo'},
+      end:{dateTime:`${endDate}T${shift.end}:00`,timeZone:'Asia/Tokyo'},
       reminders:{useDefault:false,overrides:isClass?[{method:'popup',minutes:15}]:[{method:'popup',minutes:10}]}
     })
   }).then(r=>r.json()).then(data=>{if(data.id){const s=shifts.find(x=>x.id===shift.id);if(s){s.gcalEventId=data.id;save();renderShifts();}}}).catch(()=>{});
