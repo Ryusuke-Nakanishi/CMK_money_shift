@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#1a1a1a">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CMKシフト管理">
 <link rel="manifest" href="manifest.json">
@@ -310,7 +309,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .form-group{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%}
 .form-group label{font-size:12px;color:var(--text2)}
 .form-group input,.form-group select{font-size:15px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;min-width:0;max-width:100%;box-sizing:border-box;min-height:44px}
-.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}.form-group input[type="time"],.form-group input[type="date"],.form-group input[type="month"]{color-scheme:light dark;color:var(--text);-webkit-text-fill-color:var(--text)}
+.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}.form-group input[type="date"],.form-group input[type="month"]{color-scheme:light dark}
 .btn{padding:9px 16px;border-radius:var(--radius-sm);border:.5px solid var(--border2);background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;font-family:inherit}
 .btn:active{opacity:.7}
 .btn-primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:500}
@@ -479,8 +478,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <label>日付</label><input type="date" id="edit-date">
     </div>
     <div class="form-grid form-grid-time" style="margin-bottom:10px">
-      <div class="form-group"><label>開始時刻</label><input type="time" id="edit-start"></div>
-      <div class="form-group"><label>終了時刻</label><input type="time" id="edit-end"></div>
+      <div class="form-group"><label>開始時刻</label><input type="text" id="edit-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+      <div class="form-group"><label>終了時刻</label><input type="text" id="edit-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <label>担当コース・メモ</label><input type="text" id="edit-memo">
@@ -551,8 +550,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div class="form-group"><label>日付</label><input type="date" id="home-new-date" readonly style="background:var(--bg2);color:var(--text2)"></div>
         </div>
         <div class="form-grid" style="margin-bottom:8px">
-          <div class="form-group"><label>開始</label><input type="time" id="home-new-start"></div>
-          <div class="form-group"><label>終了</label><input type="time" id="home-new-end"></div>
+          <div class="form-group"><label>開始</label><input type="text" id="home-new-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+          <div class="form-group"><label>終了</label><input type="text" id="home-new-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
         </div>
         <div class="form-group" style="margin-bottom:10px">
           <label>担当コース（任意）</label>
@@ -612,8 +611,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="form-group"><label>日付</label><input type="date" id="new-date"></div>
       </div>
       <div class="form-grid form-grid-time" style="margin-bottom:8px">
-        <div class="form-group"><label>開始</label><input type="time" id="new-start" placeholder="--:--"></div>
-        <div class="form-group"><label>終了</label><input type="time" id="new-end" placeholder="--:--"></div>
+        <div class="form-group"><label>開始</label><input type="text" id="new-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+        <div class="form-group"><label>終了</label><input type="text" id="new-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
       </div>
       <div class="form-group" style="margin-bottom:8px">
         <label>担当コース（任意）</label>
@@ -655,8 +654,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="form-group"><label>対象年月</label><input type="month" id="bulk-month" onchange="buildWeekGrid()"></div>
       </div>
       <div class="form-grid form-grid-time" style="margin-bottom:8px">
-        <div class="form-group"><label>開始時刻</label><input type="time" id="bulk-start"></div>
-        <div class="form-group"><label>終了時刻</label><input type="time" id="bulk-end"></div>
+        <div class="form-group"><label>開始時刻</label><input type="text" id="bulk-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+        <div class="form-group"><label>終了時刻</label><input type="text" id="bulk-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
       </div>
       <div class="form-group" style="margin-bottom:12px">
         <label>担当コース（任意）</label>
@@ -2086,6 +2085,32 @@ function findChatAnswer(text) {
   return 'ご質問の内容が見つかりませんでした。担当者にお問い合わせいただくか、別のキーワードでお試しください。';
 }
 
+
+// 時刻入力の自動フォーマット（例：1800 → 18:00）
+function initTimeInputs() {
+  document.querySelectorAll('input[pattern="[0-9]{2}:[0-9]{2}"]').forEach(inp => {
+    inp.addEventListener('input', function() {
+      let v = this.value.replace(/[^0-9]/g, '');
+      if (v.length >= 3) {
+        v = v.slice(0,2) + ':' + v.slice(2,4);
+      }
+      this.value = v;
+    });
+    inp.addEventListener('blur', function() {
+      // HH:MM形式の検証
+      const v = this.value;
+      if (v && !/^[0-2][0-9]:[0-5][0-9]$/.test(v)) {
+        this.style.borderColor = 'var(--danger-text)';
+      } else {
+        this.style.borderColor = '';
+      }
+    });
+    inp.addEventListener('focus', function() {
+      this.style.borderColor = '';
+    });
+  });
+}
+
 function init(){
   loadLocal();
   document.getElementById('new-date').value=toLocalDateStr(new Date());
@@ -2094,6 +2119,7 @@ function init(){
   ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
   renderAll();buildWeekGrid();
   initChatbot();
+  initTimeInputs();
 }
 init();
 
