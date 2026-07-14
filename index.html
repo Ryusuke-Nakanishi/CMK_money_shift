@@ -27,7 +27,7 @@
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
   import { getAuth, onAuthStateChanged, signOut }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, addDoc, updateDoc }
+  import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, getDocs, deleteDoc, addDoc, updateDoc, query, orderBy, where }
     from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 
   const firebaseConfig = {
@@ -142,6 +142,40 @@
     });
   }
 
+
+  // ── MTG調整 Firebase操作 ──
+  window.createMTG = async function(data) {
+    try {
+      const ref = await addDoc(collection(db, 'mtgList'), {
+        ...data, createdAt: Date.now(), status: '調整中'
+      });
+      return ref.id;
+    } catch(e) { console.warn('createMTG error', e); return null; }
+  };
+  window.fetchMTGList = async function() {
+    try {
+      const snap = await getDocs(query(collection(db, 'mtgList'), orderBy('createdAt', 'desc')));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchMTGList error', e); return []; }
+  };
+  window.fetchMTG = async function(id) {
+    try {
+      const snap = await getDoc(doc(db, 'mtgList', id));
+      return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+    } catch(e) { console.warn('fetchMTG error', e); return null; }
+  };
+  window.updateMTG = async function(id, data) {
+    try {
+      await updateDoc(doc(db, 'mtgList', id), data);
+      return true;
+    } catch(e) { console.warn('updateMTG error', e); return false; }
+  };
+  window.deleteMTG = async function(id) {
+    try {
+      await deleteDoc(doc(db, 'mtgList', id));
+      return true;
+    } catch(e) { console.warn('deleteMTG error', e); return false; }
+  };
   // ── Q&A Firebase操作 ──
   window.fetchQAList = async function() {
     try {
@@ -262,6 +296,9 @@
         const canSeeQA = ['admin','operator','ul'].includes(allowedData.role);
         qaTab.style.display = canSeeQA ? '' : 'none';
       }
+      // MTGタブの表示制御（全員表示）
+      const mtgTab = document.getElementById('tab-btn-mtg');
+      if (mtgTab) mtgTab.style.display = '';
 
       // 別アカウント切り替え検知
       const prevUid = localStorage.getItem('gcal_uid');
@@ -305,11 +342,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .metric-card{background:var(--bg2);border-radius:var(--radius-sm);padding:12px}
 .metric-card .label{font-size:11px;color:var(--text2);margin-bottom:4px;line-height:1.3}
 .metric-card .value{font-size:18px;font-weight:600}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0;width:100%;box-sizing:border-box}@media(max-width:480px){.form-grid{grid-template-columns:1fr}.form-grid-time{grid-template-columns:1fr}}
-.form-group{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0;width:100%;box-sizing:border-box}@media(max-width:480px){.form-grid{grid-template-columns:1fr}.form-grid-time{grid-template-columns:1fr 1fr}}
+.form-group{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%;overflow:hidden}
 .form-group label{font-size:12px;color:var(--text2)}
 .form-group input,.form-group select{font-size:15px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;min-width:0;max-width:100%;box-sizing:border-box;min-height:44px}
-.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}.form-group input[type="date"],.form-group input[type="month"]{color-scheme:light dark}
+.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}.form-group input[type="date"],.form-group input[type="month"]{color-scheme:light dark;display:block;width:100%;max-width:100%;box-sizing:border-box;-webkit-box-sizing:border-box}
 .btn{padding:9px 16px;border-radius:var(--radius-sm);border:.5px solid var(--border2);background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;font-family:inherit}
 .btn:active{opacity:.7}
 .btn-primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:500}
@@ -478,8 +515,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <label>日付</label><input type="date" id="edit-date">
     </div>
     <div class="form-grid form-grid-time" style="margin-bottom:10px">
-      <div class="form-group"><label>開始時刻</label><input type="text" id="edit-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
-      <div class="form-group"><label>終了時刻</label><input type="text" id="edit-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+      <div class="form-group"><label>開始時刻</label><input type="time" id="edit-start"></div>
+      <div class="form-group"><label>終了時刻</label><input type="time" id="edit-end"></div>
     </div>
     <div class="form-group" style="margin-bottom:10px">
       <label>担当コース・メモ</label><input type="text" id="edit-memo">
@@ -508,6 +545,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <button class="tab" onclick="switchTab('settings')">⚙️ 設定</button>
       <button class="tab" id="tab-btn-admin" onclick="switchTab('admin')" style="display:none">👥 管理</button>
       <button class="tab" id="tab-btn-qa" onclick="switchTab('qa')" style="display:none">❓ Q&A管理</button>
+      <button class="tab" id="tab-btn-mtg" onclick="switchTab('mtg')" style="display:none;position:relative">📆 MTG調整<span id="mtg-tab-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--danger-text);color:#fff;font-size:9px;line-height:1;padding:2px 4px;border-radius:20px;min-width:14px;text-align:center"></span></button>
     </div>
   </nav>
 </div>
@@ -516,6 +554,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
   <!-- ホーム -->
   <div id="tab-home" class="panel active">
+    <div id="home-mtg-reminder" style="display:none;margin-bottom:12px"></div>
     <div class="card">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
         <div>
@@ -550,8 +589,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
           <div class="form-group"><label>日付</label><input type="date" id="home-new-date" readonly style="background:var(--bg2);color:var(--text2)"></div>
         </div>
         <div class="form-grid" style="margin-bottom:8px">
-          <div class="form-group"><label>開始</label><input type="text" id="home-new-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
-          <div class="form-group"><label>終了</label><input type="text" id="home-new-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+          <div class="form-group"><label>開始</label><input type="time" id="home-new-start"></div>
+          <div class="form-group"><label>終了</label><input type="time" id="home-new-end"></div>
         </div>
         <div class="form-group" style="margin-bottom:10px">
           <label>担当コース（任意）</label>
@@ -611,8 +650,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="form-group"><label>日付</label><input type="date" id="new-date"></div>
       </div>
       <div class="form-grid form-grid-time" style="margin-bottom:8px">
-        <div class="form-group"><label>開始</label><input type="text" id="new-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
-        <div class="form-group"><label>終了</label><input type="text" id="new-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+        <div class="form-group"><label>開始</label><input type="time" id="new-start"></div>
+        <div class="form-group"><label>終了</label><input type="time" id="new-end"></div>
       </div>
       <div class="form-group" style="margin-bottom:8px">
         <label>担当コース（任意）</label>
@@ -654,8 +693,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <div class="form-group"><label>対象年月</label><input type="month" id="bulk-month" onchange="buildWeekGrid()"></div>
       </div>
       <div class="form-grid form-grid-time" style="margin-bottom:8px">
-        <div class="form-group"><label>開始時刻</label><input type="text" id="bulk-start" placeholder="例: 18:00" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
-        <div class="form-group"><label>終了時刻</label><input type="text" id="bulk-end" placeholder="例: 19:30" pattern="[0-9]{2}:[0-9]{2}" inputmode="numeric" maxlength="5"></div>
+        <div class="form-group"><label>開始時刻</label><input type="time" id="bulk-start"></div>
+        <div class="form-group"><label>終了時刻</label><input type="time" id="bulk-end"></div>
       </div>
       <div class="form-group" style="margin-bottom:12px">
         <label>担当コース（任意）</label>
@@ -893,6 +932,105 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
   </div>
 
+  <!-- MTG調整タブ -->
+  <div id="tab-mtg" class="panel">
+    <div id="mtg-main-view">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div class="section-title" style="margin-bottom:0">MTG調整</div>
+          <button class="btn btn-primary btn-sm" id="mtg-create-btn" onclick="showMTGCreateForm()" style="display:none">＋ MTGを作成</button>
+        </div>
+        <div id="mtg-invite-banner" style="display:none"></div>
+        <div id="mtg-status-filter-area" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-sm mtg-filter-btn active" data-filter="all" onclick="setMTGFilter('all')">すべて</button>
+          <button class="btn btn-sm mtg-filter-btn" data-filter="調整中" onclick="setMTGFilter('調整中')">調整中</button>
+          <button class="btn btn-sm mtg-filter-btn" data-filter="確定" onclick="setMTGFilter('確定')">確定</button>
+          <button class="btn btn-sm mtg-filter-btn" data-filter="終了" onclick="setMTGFilter('終了')">終了</button>
+          <button class="btn btn-sm mtg-filter-btn" data-filter="キャンセル" onclick="setMTGFilter('キャンセル')">キャンセル</button>
+        </div>
+        <div id="mtg-person-filter-area" style="display:none;margin-bottom:12px">
+          <select id="mtg-person-filter" onchange="setMTGPersonFilter(this.value)" style="font-size:12px;padding:5px 10px;border-radius:20px;border:.5px solid var(--border2);background:var(--bg);color:var(--text)">
+            <option value="">対象者：すべて</option>
+          </select>
+        </div>
+        <div id="mtg-list"><p style="font-size:13px;color:var(--text2)">読み込み中...</p></div>
+      </div>
+    </div>
+    <div id="mtg-create-view" style="display:none">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <button class="btn btn-sm" onclick="hideMTGCreateForm()">← 戻る</button>
+          <div class="section-title" style="margin-bottom:0">MTGを作成</div>
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>MTGタイトル</label>
+          <input type="text" id="mtg-title" placeholder="例: 7月全体MTG">
+        </div>
+        <div class="form-grid" style="margin-bottom:10px">
+          <div class="form-group">
+            <label>種別</label>
+            <select id="mtg-type" onchange="onMTGTypeChange()">
+              <option value="調整型">日程調整型（候補から選ぶ）</option>
+              <option value="確定型">日程確定型（日時を決める）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>所要時間（分）</label>
+            <input type="number" id="mtg-duration" placeholder="例: 60" value="60">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>業務種別（確定後のシフト分類・カレンダー表記に反映されます）</label>
+          <select id="mtg-shift-type">
+            <option value="normal">通常クラス</option>
+            <option value="camp">キャンプクラス</option>
+            <option value="training">研修業務</option>
+            <option value="dev">教材開発</option>
+            <option value="mtg" selected>その他MTG</option>
+            <option value="sns">SNSマーケティング</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>回答期限</label>
+          <input type="date" id="mtg-deadline">
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label>説明・メモ（任意）</label>
+          <textarea id="mtg-description" rows="2" style="font-size:14px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;resize:vertical;box-sizing:border-box" placeholder="MTGの目的や内容を入力"></textarea>
+        </div>
+        <div class="divider"></div>
+        <div style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <label style="font-size:12px;color:var(--text2)">候補日程</label>
+            <button class="btn btn-sm" id="mtg-candidate-add-btn" onclick="addMTGCandidate()">＋ 候補を追加</button>
+          </div>
+          <p id="mtg-fixed-type-note" style="display:none;font-size:12px;color:var(--text3);margin-bottom:8px">日程確定型では候補は1件のみです。招待メンバーは「参加する／参加しない」で回答します。</p>
+          <div id="mtg-candidates"><p style="font-size:12px;color:var(--text3)">候補日を追加してください</p></div>
+        </div>
+        <div class="divider"></div>
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:8px">招待メンバー</label>
+          <div id="mtg-invitees-list"></div>
+          <div style="margin-top:8px;font-size:12px;color:var(--text2);background:var(--bg2);padding:8px 12px;border-radius:var(--radius-sm)">MTG作成後に外部共有リンクが発行されます</div>
+        </div>
+        <div class="flash" id="mtg-create-msg"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="submitCreateMTG()">MTGを作成</button>
+          <button class="btn" onclick="hideMTGCreateForm()">キャンセル</button>
+        </div>
+      </div>
+    </div>
+    <div id="mtg-detail-view" style="display:none">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <button class="btn btn-sm" onclick="hideMTGDetail()">← 戻る</button>
+          <div class="section-title" style="margin-bottom:0" id="mtg-detail-title"></div>
+        </div>
+        <div id="mtg-detail-content"></div>
+      </div>
+    </div>
+  </div>
+
 
 <!-- チャットボット（JS生成） -->
 
@@ -906,7 +1044,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </footer>
 
 <script>
-const APP_VERSION='3.2.0';
+const APP_VERSION='3.4.0';
 document.getElementById('ver-badge').textContent='v'+APP_VERSION;
 document.getElementById('ver-display').textContent=APP_VERSION;
 
@@ -936,6 +1074,8 @@ window.onFirebaseDataLoaded=function(){
   if(window._fbPayments!==null){const d=window._fbPayments;payments=d.amounts||d;annualGoals=d.goals||annualGoals;}
   saveLocal();renderAll();
   ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
+  // 確定MTGのシフト自動追加チェック
+  setTimeout(checkConfirmedMTGShifts, 1000);
 };
 window.onAccountChanged=function(){
   shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
@@ -979,7 +1119,7 @@ function getRatesForMonth(yrmo){
 }
 
 function switchTab(t){
-  const ids=['home','shifts','bulk','invoice','annual','manual','settings','admin','qa'];
+  const ids=['home','shifts','bulk','invoice','annual','manual','settings','admin','qa','mtg'];
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',ids[i]===t));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
@@ -989,6 +1129,7 @@ function switchTab(t){
   if(t==='home')renderHome();
   if(t==='admin')renderAdminUserList();
   if(t==='qa')renderQAList();
+  if(t==='mtg')renderMTGTab();
 }
 
 function showFlash(id,txt,ok){
@@ -1478,8 +1619,9 @@ function syncToGcal(shift){
   }).then(r=>r.json()).then(data=>{if(data.id){const s=shifts.find(x=>x.id===shift.id);if(s){s.gcalEventId=data.id;save();renderShifts();}}}).catch(()=>{});
 }
 function deleteFromGcal(gcalEventId){
-  if(!window._gcalToken||!gcalEventId)return;
-  fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`,{method:'DELETE',headers:{'Authorization':'Bearer '+window._gcalToken}}).catch(()=>{});
+  if(!window._gcalToken||!gcalEventId)return Promise.resolve();
+  return fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`,{method:'DELETE',headers:{'Authorization':'Bearer '+window._gcalToken}})
+    .catch(e=>console.warn('deleteFromGcal失敗', gcalEventId, e));
 }
 
 function exportData(){
@@ -1657,6 +1799,906 @@ async function deleteUser(email, name) {
 }
 
 
+
+
+
+// Firestoreのフィールドキー用にメールアドレスをエスケープ
+function escapeEmail(email) {
+  return email.replace(/\./g, '_DOT_').replace(/@/g, '_AT_');
+}
+function unescapeEmail(key) {
+  return key.replace(/_DOT_/g, '.').replace(/_AT_/g, '@');
+}
+
+// ── MTG調整 ──
+let mtgCandidates = [];
+let mtgFilter = 'all'; // フィルター状態
+let mtgPersonFilter = ''; // 対象者（招待メンバー）フィルター state
+
+function setMTGFilter(filter) {
+  mtgFilter = filter;
+  // ボタンのアクティブ状態を更新
+  document.querySelectorAll('.mtg-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filter);
+  });
+  loadMTGList();
+}
+
+function setMTGPersonFilter(email) {
+  mtgPersonFilter = email || '';
+  loadMTGList();
+}
+
+// 対象者フィルターの選択肢を読み込み（オペレーター以上のみ使用）
+async function populateMTGPersonFilter() {
+  const sel = document.getElementById('mtg-person-filter');
+  if (!sel) return;
+  const users = await window.fetchAllUsers();
+  const options = ['<option value="">対象者：すべて</option>']
+    .concat(users.map(u => `<option value="${u.email}">${u.name||u.email}</option>`));
+  sel.innerHTML = options.join('');
+  sel.value = mtgPersonFilter;
+} // 候補日リスト
+let currentMTGId = null; // 現在表示中のMTG ID
+
+
+// 時刻入力の自動フォーマット
+function formatTimeInput(input) {
+  let v = input.value.replace(/[^0-9:]/g, '');
+  // コロンなしで4桁入力された場合に自動挿入
+  const digits = v.replace(/:/g, '');
+  if (digits.length >= 4 && !v.includes(':')) {
+    v = digits.slice(0,2) + ':' + digits.slice(2,4);
+  } else if (digits.length === 3 && !v.includes(':')) {
+    v = '0' + digits.slice(0,1) + ':' + digits.slice(1,3);
+  }
+  input.value = v;
+}
+
+// MTG候補の終了時刻を所要時間から自動計算
+function autoCalcMTGEnd(idx) {
+  const startVal = mtgCandidates[idx].start;
+  const duration = parseInt(document.getElementById('mtg-duration')?.value) || 60;
+  if (!startVal || !/^\d{2}:\d{2}$/.test(startVal)) return;
+  const [h, m] = startVal.split(':').map(Number);
+  const totalMin = h * 60 + m + duration;
+  const endH = Math.floor(totalMin / 60) % 24;
+  const endM = totalMin % 60;
+  const endStr = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
+  mtgCandidates[idx].end = endStr;
+  const endInput = document.getElementById(`mtg-c-end-${idx}`);
+  if (endInput) endInput.value = endStr;
+}
+
+// MTGタブ表示
+async function renderMTGTab() {
+  const myRole = window._currentUser?.role || '';
+  const canCreate = ['admin','operator','ul'].includes(myRole);
+  const createBtn = document.getElementById('mtg-create-btn');
+  if (createBtn) createBtn.style.display = canCreate ? '' : 'none';
+  // ステータスフィルター（すべて/調整中/確定/終了/キャンセル）は全ユーザーに表示
+  // 対象者（招待メンバー）絞り込みはadmin・operator（オペレーター以上）のみ表示
+  const personFilterArea = document.getElementById('mtg-person-filter-area');
+  const canSeeAll = ['admin','operator'].includes(myRole);
+  if (personFilterArea) personFilterArea.style.display = canSeeAll ? '' : 'none';
+  if (canSeeAll) await populateMTGPersonFilter();
+  showMTGMainView();
+  await loadMTGList();
+}
+
+function showMTGMainView() {
+  document.getElementById('mtg-main-view').style.display = '';
+  document.getElementById('mtg-create-view').style.display = 'none';
+  document.getElementById('mtg-detail-view').style.display = 'none';
+}
+
+// MTG一覧読み込み
+async function loadMTGList() {
+  const el = document.getElementById('mtg-list');
+  if (!el) return;
+  el.innerHTML = '<p style="font-size:13px;color:var(--text2)">読み込み中...</p>';
+  const allList = await window.fetchMTGList();
+  computeMTGReminders(allList);
+  const myEmail = window._currentUser?.email || '';
+  const myRole = window._currentUser?.role || '';
+  const canSeeAll = ['admin','operator'].includes(myRole);
+
+  // 役職ごとの表示フィルタリング
+  let visibleList = allList;
+  if (!canSeeAll) {
+    visibleList = allList.filter(m => {
+      const isCreator = m.createdBy === myEmail;
+      const isInvited = (m.invitees||[]).includes(myEmail);
+      if (myRole === 'ul') return isCreator || isInvited;
+      return isInvited; // sub_ul・instructor・trainee
+    });
+  }
+
+  // ステータスフィルタリング
+  let list = mtgFilter === 'all' ? visibleList : visibleList.filter(m => m.status === mtgFilter);
+
+  // 対象者（招待メンバー）フィルタリング（オペレーター以上のみ）
+  if (canSeeAll && mtgPersonFilter) {
+    list = list.filter(m => (m.invitees||[]).includes(mtgPersonFilter) || m.createdBy === mtgPersonFilter);
+  }
+
+  if (!visibleList.length) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--text2)">表示できるMTGがありません</p>';
+    return;
+  }
+  if (!list.length) {
+    el.innerHTML = `<p style="font-size:13px;color:var(--text2)">${mtgPersonFilter?'その対象者を含む':''}「${mtgFilter}」のMTGはありません</p>`;
+    return;
+  }
+  el.innerHTML = list.map(mtg => {
+    const isCreator = mtg.createdBy === myEmail;
+    const isInvited = (mtg.invitees || []).includes(myEmail);
+    // ネストしたレスポンスを考慮
+    const escapedKey = escapeEmail(myEmail);
+    const hasAnswered = mtg.responses && (mtg.responses[escapedKey] || mtg.responses[myEmail]);
+    const statusColor = mtg.status === '確定' ? 'var(--success-text)' : mtg.status === '調整中' ? 'var(--warning-text)' : mtg.status === 'キャンセル' ? 'var(--danger-text)' : 'var(--text3)';
+    const statusBg = mtg.status === '確定' ? 'var(--success-bg)' : mtg.status === '調整中' ? 'var(--warning-bg)' : mtg.status === 'キャンセル' ? 'var(--danger-bg)' : 'var(--bg3)';
+    const answeredBadge = isInvited && !hasAnswered && mtg.status === '調整中'
+      ? '<span style="font-size:10px;padding:1px 6px;border-radius:20px;background:var(--danger-bg);color:var(--danger-text)">未回答</span>' : '';
+    return `<div style="padding:12px 0;border-bottom:.5px solid var(--border);cursor:pointer" onclick="showMTGDetail('${mtg.id}')">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-size:14px;font-weight:500;display:flex;align-items:center;gap:6px">
+          ${mtg.title} ${answeredBadge}
+        </div>
+        <span style="font-size:11px;padding:2px 8px;border-radius:20px;background:${statusBg};color:${statusColor}">${mtg.status}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2)">
+        <span style="padding:1px 6px;border-radius:20px;background:var(--bg3);color:var(--text2);font-size:11px">${TYPE_LABEL[mtg.shiftType]||'その他MTG'}</span>
+        ${mtg.type} · ${mtg.duration}分 · 期限:${mtg.deadline||'未設定'} · 候補${(mtg.candidates||[]).length}件
+      </div>
+      ${isCreator ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">作成者</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+// MTG作成フォーム
+function showMTGCreateForm() {
+  mtgCandidates = [];
+  document.getElementById('mtg-title').value = '';
+  document.getElementById('mtg-duration').value = '60';
+  document.getElementById('mtg-deadline').value = '';
+  document.getElementById('mtg-description').value = '';
+  document.getElementById('mtg-shift-type').value = 'mtg';
+  document.getElementById('mtg-type').value = '調整型';
+  document.getElementById('mtg-create-msg').className = 'flash';
+  onMTGTypeChange();
+  renderMTGInvitees();
+  document.getElementById('mtg-main-view').style.display = 'none';
+  document.getElementById('mtg-create-view').style.display = '';
+  document.getElementById('mtg-detail-view').style.display = 'none';
+}
+function hideMTGCreateForm() { showMTGMainView(); loadMTGList(); }
+
+// 種別切替（調整型／確定型）：確定型では候補を1件に固定し、複数追加できないようにする
+function onMTGTypeChange() {
+  const type = document.getElementById('mtg-type').value;
+  const addBtn = document.getElementById('mtg-candidate-add-btn');
+  const note = document.getElementById('mtg-fixed-type-note');
+  if (type === '確定型') {
+    if (addBtn) addBtn.style.display = 'none';
+    if (note) note.style.display = '';
+    if (mtgCandidates.length === 0) mtgCandidates.push({ id: Date.now()+'', date: '', start: '', end: '', gcalEventId: null });
+    else if (mtgCandidates.length > 1) mtgCandidates = mtgCandidates.slice(0, 1);
+  } else {
+    if (addBtn) addBtn.style.display = '';
+    if (note) note.style.display = 'none';
+  }
+  renderMTGCandidates();
+}
+
+// 候補日追加
+function addMTGCandidate() {
+  const type = document.getElementById('mtg-type')?.value;
+  if (type === '確定型' && mtgCandidates.length >= 1) return; // 確定型は1件のみ
+  mtgCandidates.push({ id: Date.now()+'', date: '', start: '', end: '', gcalEventId: null });
+  renderMTGCandidates();
+}
+function removeMTGCandidate(id) {
+  const type = document.getElementById('mtg-type')?.value;
+  if (type === '確定型') return; // 確定型では候補を0件にできない（常に1件固定）
+  mtgCandidates = mtgCandidates.filter(c => c.id !== id);
+  renderMTGCandidates();
+}
+function renderMTGCandidates() {
+  const el = document.getElementById('mtg-candidates');
+  if (!el) return;
+  const isFixedType = document.getElementById('mtg-type')?.value === '確定型';
+  if (!mtgCandidates.length) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text3)">候補日を追加してください（最大制限なし）</p>';
+    return;
+  }
+  el.innerHTML = mtgCandidates.map((c,i) => `
+    <div style="display:grid;grid-template-columns:1fr 80px 80px auto;gap:6px;align-items:end;margin-bottom:8px">
+      <div class="form-group">
+        ${i===0?'<label style="font-size:11px;color:var(--text2)">日付</label>':''}
+        <input type="date" value="${c.date}" onchange="mtgCandidates[${i}].date=this.value" style="font-size:13px;padding:6px 8px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;box-sizing:border-box">
+      </div>
+      <div class="form-group">
+        ${i===0?'<label style="font-size:11px;color:var(--text2)">開始</label>':''}
+        <input type="time" id="mtg-c-start-${i}" value="${c.start}" onchange="mtgCandidates[${i}].start=this.value;autoCalcMTGEnd(${i})" style="font-size:13px;padding:6px 8px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;box-sizing:border-box;color-scheme:light dark">
+      </div>
+      <div class="form-group">
+        ${i===0?'<label style="font-size:11px;color:var(--text2)">終了</label>':''}
+        <input type="time" id="mtg-c-end-${i}" value="${c.end}" onchange="mtgCandidates[${i}].end=this.value" style="font-size:13px;padding:6px 8px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;box-sizing:border-box;color-scheme:light dark">
+      </div>
+      ${isFixedType ? '' : `<button class="btn btn-sm btn-danger" style="padding:6px 8px" onclick="removeMTGCandidate('${c.id}')" ${i===0?'style="margin-top:18px"':''}>×</button>`}
+    </div>`).join('');
+}
+
+// 招待メンバー
+let mtgInvitees = [];
+async function renderMTGInvitees() {
+  const el = document.getElementById('mtg-invitees-list');
+  if (!el) return;
+  const users = await window.fetchAllUsers();
+  const myEmail = window._currentUser?.email || '';
+  const others = users.filter(u => u.email !== myEmail);
+  el.innerHTML = others.map(u => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:.5px solid var(--border);cursor:pointer;font-size:13px">
+      <input type="checkbox" value="${u.email}" onchange="toggleMTGInvitee('${u.email}')" style="width:16px;height:16px">
+      <span>${u.name||u.email}</span>
+      <span style="font-size:11px;color:var(--text3)">${ROLES[u.role]?.label||u.role}</span>
+    </label>`).join('');
+}
+function toggleMTGInvitee(email) {
+  if (mtgInvitees.includes(email)) {
+    mtgInvitees = mtgInvitees.filter(e => e !== email);
+  } else {
+    mtgInvitees.push(email);
+  }
+}
+
+// MTG作成送信
+async function submitCreateMTG() {
+  const title = document.getElementById('mtg-title').value.trim();
+  const type = document.getElementById('mtg-type').value;
+  const shiftType = document.getElementById('mtg-shift-type').value || 'mtg';
+  const duration = parseInt(document.getElementById('mtg-duration').value) || 60;
+  const deadline = document.getElementById('mtg-deadline').value;
+  const description = document.getElementById('mtg-description').value.trim();
+  if (type === '確定型' && mtgCandidates.length > 1) mtgCandidates = mtgCandidates.slice(0, 1); // 確定型は1件のみ（念のための防御）
+  if (!title) { showFlash('mtg-create-msg','タイトルを入力してください',false); return; }
+  if (!mtgCandidates.length) { showFlash('mtg-create-msg','候補日を1件以上追加してください',false); return; }
+  const invalidCandidates = mtgCandidates.some(c => !c.date || !c.start);
+  if (invalidCandidates) { showFlash('mtg-create-msg','候補日の日付と開始時刻を入力してください',false); return; }
+
+  // 候補IDを確定（インデックスベース）
+  const candidates = await Promise.all(mtgCandidates.map(async (c, idx) => {
+    const stableId = `c${idx}_${Date.now()}`;
+    let gcalEventId = null;
+    const token = window._gcalToken || localStorage.getItem('gcal_token');
+    if (token) {
+      window._gcalToken = token;
+      gcalEventId = await addMTGCandidateToGcal(c, title, duration, shiftType);
+    }
+    return { ...c, id: stableId, gcalEventId };
+  }));
+
+  const mtgData = {
+    title, type, shiftType, duration, deadline, description,
+    candidates, invitees: mtgInvitees,
+    createdBy: window._currentUser?.email || '',
+    createdByName: window._currentUser?.name || '',
+    responses: {}, status: '調整中'
+  };
+  const id = await window.createMTG(mtgData);
+  if (id) {
+    showFlash('mtg-create-msg','MTGを作成しました',true);
+    setTimeout(() => { hideMTGCreateForm(); }, 1000);
+  } else {
+    showFlash('mtg-create-msg','作成に失敗しました',false);
+  }
+}
+
+// MTGの業務種別からカレンダー表記用の短いラベルを取得（例: '研修', 'MTG'）
+function mtgCalLabel(shiftType) {
+  const bracketed = TYPE_GCAL[shiftType] || TYPE_GCAL['mtg'];
+  return bracketed.replace(/[【】]/g, '');
+}
+
+// GoogleカレンダーにMTG候補を仮登録
+async function addMTGCandidateToGcal(candidate, title, duration, shiftType) {
+  const token = window._gcalToken || localStorage.getItem('gcal_token');
+  if (!token || !candidate.date || !candidate.start) {
+    console.log('GCal skip:', { token: !!token, date: candidate.date, start: candidate.start });
+    return null;
+  }
+  window._gcalToken = token;
+  try {
+    const startDT = `${candidate.date}T${candidate.start}:00`;
+    // 終了時刻が指定されていない場合は所要時間から計算
+    let endTime = candidate.end;
+    if (!endTime) {
+      const [h,m] = candidate.start.split(':').map(Number);
+      const totalMin = h*60 + m + duration;
+      endTime = `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+    }
+    const endDT = `${candidate.date}T${endTime}:00`;
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        summary:`【${mtgCalLabel(shiftType)}候補】${title}`,
+        start:{dateTime:startDT,timeZone:'Asia/Tokyo'},
+        end:{dateTime:endDT,timeZone:'Asia/Tokyo'},
+        colorId:'5', // バナナ色（候補を示す）
+        reminders:{useDefault:false,overrides:[]}
+      })
+    });
+    const data = await res.json();
+    return data.id || null;
+  } catch(e) { return null; }
+}
+
+// MTG詳細表示
+async function showMTGDetail(id) {
+  currentMTGId = id;
+  document.getElementById('mtg-main-view').style.display = 'none';
+  document.getElementById('mtg-create-view').style.display = 'none';
+  document.getElementById('mtg-detail-view').style.display = '';
+  document.getElementById('mtg-detail-content').innerHTML = '<p style="font-size:13px;color:var(--text2)">読み込み中...</p>';
+  const mtg = await window.fetchMTG(id);
+  if (!mtg) { document.getElementById('mtg-detail-content').innerHTML = '<p style="font-size:13px;color:var(--danger-text)">取得に失敗しました</p>'; return; }
+  document.getElementById('mtg-detail-title').textContent = mtg.title;
+  renderMTGDetail(mtg);
+}
+function hideMTGDetail() { currentMTGId = null; showMTGMainView(); loadMTGList(); }
+
+function renderMTGDetail(mtg) {
+  const el = document.getElementById('mtg-detail-content');
+  if (!el) return;
+  const myEmail = window._currentUser?.email || '';
+  const myRole = window._currentUser?.role || '';
+  const isCreator = mtg.createdBy === myEmail;
+  const canManage = isCreator || ['admin','operator'].includes(myRole);
+  const isInvited = (mtg.invitees || []).includes(myEmail);
+  const myResponseKey = escapeEmail(myEmail);
+  const myResponse = mtg.responses?.[myResponseKey] || mtg.responses?.[myEmail];
+  const candidates = mtg.candidates || [];
+  const responses = mtg.responses || {};
+
+  // 外部リンク
+  const shareUrl = `${location.origin}/mtg-response.html?id=${mtg.id}`;
+
+  // 回答集計
+  // ネストしてしまったレスポンスをフラット化
+  const flatResponses = {};
+  Object.entries(responses).forEach(([k,v]) => {
+    if (v && typeof v === 'object' && v.candidates) {
+      flatResponses[k] = v;
+    }
+  });
+  const responseSummary = candidates.map(c => {
+    const count = Object.values(flatResponses).filter(r => (r.candidates||[]).includes(c.id)).length;
+    const total = Object.keys(flatResponses).length;
+    return { ...c, count, total };
+  }).sort((a,b) => b.count - a.count);
+
+  let html = `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <span style="padding:1px 8px;border-radius:20px;background:var(--bg3);color:var(--text2);font-size:12px">${TYPE_LABEL[mtg.shiftType]||'その他MTG'}</span>
+        <span style="font-size:13px;color:var(--text2)">${mtg.type}</span>
+        <span style="font-size:13px;color:var(--text2)">·</span>
+        <span style="font-size:13px;color:var(--text2)">${mtg.duration}分</span>
+        ${mtg.deadline?`<span style="font-size:13px;color:var(--text2)">· 期限: ${mtg.deadline}</span>`:''}
+      </div>
+      ${mtg.description?`<p style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:8px">${mtg.description}</p>`:''}
+      <div style="font-size:12px;color:var(--text3)">作成者: ${mtg.createdByName||mtg.createdBy} · 回答数: ${Object.keys(responses).length}名</div>
+    </div>`;
+
+  // 外部共有リンク
+  if (canManage) {
+    html += `
+      <div style="margin-bottom:12px;padding:10px 12px;background:var(--bg2);border-radius:var(--radius-sm)">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:6px">外部共有リンク</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:11px;color:var(--text3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${shareUrl}</div>
+          <button class="btn btn-sm" onclick="navigator.clipboard.writeText('${shareUrl}').then(()=>alert('コピーしました'))">コピー</button>
+        </div>
+      </div>`;
+  }
+
+  // 候補日一覧と回答集計
+  html += `<div class="section-title">候補日程</div>`;
+  html += responseSummary.map(c => {
+    const pct = c.total > 0 ? Math.round(c.count/c.total*100) : 0;
+    const myAnswered = myResponse && (myResponse.candidates||[]).includes(c.id);
+    const isConfirmed = mtg.confirmedCandidate === c.id;
+    return `
+      <div style="padding:10px 12px;margin-bottom:6px;border-radius:var(--radius-sm);border:.5px solid ${isConfirmed?'var(--success-text)':'var(--border)'};background:${isConfirmed?'var(--success-bg)':'var(--bg2)'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-size:13px;font-weight:500">${c.date} ${c.start}${c.end?'〜'+c.end:''}</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            ${isConfirmed?'<span style="font-size:11px;padding:2px 8px;border-radius:20px;background:var(--success-bg);color:var(--success-text)">確定</span>':''}
+            ${canManage && mtg.status==='調整中'?`<button class="btn btn-sm" style="font-size:11px;padding:3px 8px" onclick="confirmMTG('${mtg.id}','${c.id}')">確定</button>`:''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;background:var(--bg3);border-radius:20px;height:6px;overflow:hidden">
+            <div style="height:100%;border-radius:20px;background:var(--success-text);width:${pct}%;transition:width .3s"></div>
+          </div>
+          <div style="font-size:12px;color:var(--text2);white-space:nowrap">${c.count}/${c.total}名 (${pct}%)</div>
+          ${myAnswered?'<span style="font-size:11px;color:var(--success-text)">✓参加可</span>':''}
+        </div>
+      </div>`;
+  }).join('');
+
+  // 自分の回答フォーム（招待されている場合）
+  if ((isInvited || canManage) && mtg.status === '調整中') {
+    const isFixedType = mtg.type === '確定型';
+    html += `
+      <div class="divider"></div>
+      <div class="section-title">あなたの回答</div>`;
+    if (isFixedType) {
+      const c = candidates[0];
+      const currentlyYes = myResponse && (myResponse.candidates||[]).includes(c?.id);
+      const currentlyNo = myResponse && !currentlyYes;
+      html += `
+      <p style="font-size:12px;color:var(--text2);margin-bottom:10px">この日程に参加できますか？</p>
+      <div id="mtg-response-form" data-mtg-type="確定型" data-candidate-id="${c?.id||''}">
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:var(--radius-sm);border:.5px solid ${currentlyYes?'var(--success-text)':'var(--border2)'};background:${currentlyYes?'var(--success-bg)':'var(--bg)'};cursor:pointer;font-size:13px">
+            <input type="radio" name="mtg-attend" value="yes" ${currentlyYes?'checked':''} style="width:16px;height:16px">
+            参加する
+          </label>
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:var(--radius-sm);border:.5px solid ${currentlyNo?'var(--danger-text)':'var(--border2)'};background:${currentlyNo?'var(--danger-bg)':'var(--bg)'};cursor:pointer;font-size:13px">
+            <input type="radio" name="mtg-attend" value="no" ${currentlyNo?'checked':''} style="width:16px;height:16px">
+            参加しない
+          </label>
+        </div>
+      </div>`;
+    } else {
+      html += `
+      <p style="font-size:12px;color:var(--text2);margin-bottom:10px">参加可能な日程を選んでください（複数選択可）</p>
+      <div id="mtg-response-form" data-mtg-type="調整型">`;
+      candidates.forEach(c => {
+        const checked = myResponse && (myResponse.candidates||[]).includes(c.id);
+        html += `
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border);cursor:pointer;font-size:13px">
+          <input type="checkbox" value="${c.id}" ${checked?'checked':''} style="width:16px;height:16px">
+          <span>${c.date} ${c.start}${c.end?'〜'+c.end:''}</span>
+        </label>`;
+      });
+      html += `</div>`;
+    }
+    html += `
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-primary" onclick="submitMTGResponse('${mtg.id}')">回答を送信</button>
+      </div>
+      <div class="flash" id="mtg-response-msg"></div>`;
+  }
+
+  // 回答一覧を表形式で表示（作成者・管理者のみ）
+  if (canManage && Object.keys(flatResponses).length > 0) {
+    html += `<div class="divider"></div><div class="section-title">回答一覧</div>`;
+    // 表ヘッダー
+    html += `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">`;
+    html += `<thead><tr style="background:var(--bg2)">`;
+    html += `<th style="padding:8px 10px;text-align:left;border:.5px solid var(--border);white-space:nowrap">名前</th>`;
+    candidates.forEach(c => {
+      html += `<th style="padding:8px 6px;text-align:center;border:.5px solid var(--border);white-space:nowrap">${c.date.slice(5)}<br>${c.start}</th>`;
+    });
+    html += `</tr></thead><tbody>`;
+    // 各ユーザーの回答行
+    Object.entries(flatResponses).forEach(([key, r]) => {
+      html += `<tr>`;
+      html += `<td style="padding:8px 10px;border:.5px solid var(--border);font-weight:500;white-space:nowrap">${r.name||unescapeEmail(key)}</td>`;
+      candidates.forEach(c => {
+        const canAttend = (r.candidates||[]).includes(c.id);
+        html += `<td style="padding:8px 6px;text-align:center;border:.5px solid var(--border);background:${canAttend?'var(--success-bg)':'var(--bg)'};color:${canAttend?'var(--success-text)':'var(--text3)'}">
+          ${canAttend?'✓':'－'}
+        </td>`;
+      });
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  // 終了・削除ボタン
+  if (canManage) {
+    html += '<div class="divider"></div><div style="display:flex;gap:8px;flex-wrap:wrap">';
+    if (mtg.status === '確定') {
+      html += `<button class="btn btn-sm" onclick="finishMTG('${mtg.id}')">✓ MTGを終了にする</button>`;
+      if (isCreator) {
+        html += `<button class="btn btn-sm btn-danger" onclick="cancelMTG('${mtg.id}')">このMTGをキャンセル</button>`;
+      }
+    }
+    if (mtg.status === '調整中') {
+      html += `<button class="btn btn-sm btn-danger" onclick="deleteMTGItem('${mtg.id}')">このMTGを削除</button>`;
+    }
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// 回答送信
+async function submitMTGResponse(mtgId) {
+  const form = document.getElementById('mtg-response-form');
+  const isFixedType = form?.dataset.mtgType === '確定型';
+  let selectedIds;
+  if (isFixedType) {
+    const checkedRadio = form.querySelector('input[name="mtg-attend"]:checked');
+    if (!checkedRadio) { showFlash('mtg-response-msg','「参加する」「参加しない」のいずれかを選んでください',false); return; }
+    const candidateId = form.dataset.candidateId;
+    selectedIds = checkedRadio.value === 'yes' && candidateId ? [candidateId] : [];
+  } else {
+    const checkboxes = document.querySelectorAll('#mtg-response-form input[type="checkbox"]:checked');
+    selectedIds = Array.from(checkboxes).map(cb => cb.value);
+  }
+  const myEmail = window._currentUser?.email || '';
+  const myName = window._currentUser?.name || myEmail;
+  const emailKey = escapeEmail(myEmail);
+
+  // 候補一覧と自分の既存回答（前回選択した候補のgcalEventId）を取得
+  const mtg = await window.fetchMTG(mtgId);
+  if (!mtg) { showFlash('mtg-response-msg','MTGの取得に失敗しました',false); return; }
+  const prevResponse = mtg.responses?.[emailKey] || mtg.responses?.[myEmail] || {};
+  const prevSelected = prevResponse.candidates || [];
+  const prevEventIds = prevResponse.gcalEventIds || {};
+
+  // 選択した候補＝自分の可能日時 → 自分のGoogleカレンダーに仮登録／解除した候補は削除
+  const newEventIds = {};
+  if (window._gcalToken) {
+    for (const c of (mtg.candidates || [])) {
+      const wasSelected = prevSelected.includes(c.id);
+      const isSelected = selectedIds.includes(c.id);
+      if (isSelected && wasSelected) {
+        if (prevEventIds[c.id]) newEventIds[c.id] = prevEventIds[c.id];
+      } else if (isSelected && !wasSelected) {
+        try {
+          const eventId = await addMTGCandidateToGcal(c, mtg.title, mtg.duration, mtg.shiftType);
+          if (eventId) newEventIds[c.id] = eventId;
+        } catch(e) { console.warn('候補の仮登録に失敗', e); }
+      } else if (!isSelected && wasSelected && prevEventIds[c.id]) {
+        try { await deleteFromGcal(prevEventIds[c.id]); } catch(e) { console.warn('候補の仮登録解除に失敗', e); }
+      }
+    }
+  }
+
+  const updateData = {};
+  updateData[`responses.${emailKey}`] = {
+    name: myName, email: myEmail, candidates: selectedIds,
+    answeredAt: Date.now(), gcalEventIds: newEventIds
+  };
+  const ok = await window.updateMTG(mtgId, updateData);
+  if (ok) {
+    showFlash('mtg-response-msg','回答を送信しました',true);
+    // 回答済みになったので未回答リマインダーから即座に除外
+    window._mtgUnanswered = (window._mtgUnanswered||[]).filter(m => m.id !== mtgId);
+    renderMTGReminderUI();
+    setTimeout(async () => {
+      const mtg = await window.fetchMTG(mtgId);
+      if (mtg) renderMTGDetail(mtg);
+    }, 800);
+  } else {
+    showFlash('mtg-response-msg','送信に失敗しました',false);
+  }
+}
+
+// MTG確定
+async function confirmMTG(mtgId, candidateId) {
+  if (!confirm('この日程でMTGを確定しますか？\n確定後は他の候補枠がGoogleカレンダーから削除されます。')) return;
+  const mtg = await window.fetchMTG(mtgId);
+  if (!mtg) return;
+  const confirmedCandidate = mtg.candidates.find(c => c.id === candidateId);
+  if (!confirmedCandidate) return;
+
+  // 確定しなかった候補をGoogleカレンダーから削除
+  if (window._gcalToken) {
+    for (const c of mtg.candidates) {
+      if (c.id !== candidateId && c.gcalEventId) {
+        await deleteFromGcal(c.gcalEventId);
+      }
+    }
+    // 確定候補のカレンダーイベントを「確定」に更新
+    if (confirmedCandidate.gcalEventId) {
+      try {
+        await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${confirmedCandidate.gcalEventId}`, {
+          method:'PATCH',
+          headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+          body:JSON.stringify({ summary:`【${mtgCalLabel(mtg.shiftType)}確定】${mtg.title}`, colorId:'10' })
+        });
+      } catch(e) {}
+    }
+  }
+
+  const shiftDate = confirmedCandidate.date;
+  const shiftStart = confirmedCandidate.start;
+  const shiftEnd = confirmedCandidate.end || (() => {
+    const [h,m] = shiftStart.split(':').map(Number);
+    const totalMin = h*60+m+mtg.duration;
+    return `${String(Math.floor(totalMin/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+  })();
+
+  // 自分（作成者）のシフトに追加
+  const myEmail = window._currentUser?.email || '';
+  if (mtg.createdBy === myEmail) {
+    const newShift = {
+      id: Date.now()+Math.random(), type: mtg.shiftType || 'mtg',
+      date:shiftDate, start:shiftStart, end:shiftEnd,
+      memo:mtg.title, closed:false, gcalEventId:confirmedCandidate.gcalEventId||null
+    };
+    shifts.push(newShift);
+    save();
+    renderShifts();renderMetrics();renderHome();
+  }
+
+  // Firestoreに確定情報を保存
+  // confirmedShiftInfoに確定日程情報を保存→招待者が次回ログイン時に自動取得
+  await window.updateMTG(mtgId, {
+    status: '確定',
+    confirmedCandidate: candidateId,
+    confirmedShift: {
+      date: shiftDate, start: shiftStart, end: shiftEnd,
+      title: mtg.title, type: mtg.shiftType || 'mtg'
+    }
+  });
+
+  alert('MTGを確定しました！\n' + shiftDate + ' ' + shiftStart + '〜' + shiftEnd + '\n\n招待メンバーが次回アプリを開いた際にシフトに自動追加されます。');
+  const updatedMTG = await window.fetchMTG(mtgId);
+  if (updatedMTG) renderMTGDetail(updatedMTG);
+}
+
+
+// MTGキャンセル（主催者のみ）
+async function cancelMTG(mtgId) {
+  if (!confirm('このMTGをキャンセルしますか？\n確定済みのGoogleカレンダーイベントが削除され、参加者のシフトからも削除されます。')) return;
+  const mtg = await window.fetchMTG(mtgId);
+  if (!mtg) return;
+
+  // 確定候補のGoogleカレンダーイベントを削除
+  if (window._gcalToken) {
+    const confirmed = (mtg.candidates||[]).find(c => c.id === mtg.confirmedCandidate);
+    if (confirmed?.gcalEventId) {
+      await deleteFromGcal(confirmed.gcalEventId);
+    }
+  }
+
+  // Firestoreをキャンセル状態に更新
+  await window.updateMTG(mtgId, { status: 'キャンセル', cancelledAt: Date.now() });
+
+  // 自分（主催者）のシフトから削除
+  const s = mtg.confirmedShift;
+  if (s) {
+    const idx = shifts.findIndex(sh =>
+      sh.date === s.date && sh.start === s.start && sh.memo === s.title && sh.type === (s.type || 'mtg')
+    );
+    if (idx !== -1) {
+      const gcalId = shifts[idx].gcalEventId;
+      if (gcalId && window._gcalToken) deleteFromGcal(gcalId);
+      shifts.splice(idx, 1);
+      save();
+      renderShifts();renderMetrics();renderHome();
+    }
+  }
+
+  alert('MTGをキャンセルしました。\n招待メンバーが次回アプリを開いた際にシフトから自動削除されます。');
+  const updatedMTG = await window.fetchMTG(mtgId);
+  if (updatedMTG) renderMTGDetail(updatedMTG);
+}
+
+// MTG終了
+async function finishMTG(mtgId) {
+  if (!confirm('このMTGを終了済みにしますか？')) return;
+  const ok = await window.updateMTG(mtgId, { status: '終了' });
+  if (ok) {
+    const mtg = await window.fetchMTG(mtgId);
+    if (mtg) renderMTGDetail(mtg);
+  } else {
+    alert('更新に失敗しました');
+  }
+}
+
+// MTG削除
+async function deleteMTGItem(mtgId) {
+  if (!confirm('このMTGを削除しますか？\nGoogleカレンダーの候補枠も削除されます。')) return;
+  const mtg = await window.fetchMTG(mtgId);
+  if (mtg && window._gcalToken) {
+    for (const c of mtg.candidates||[]) {
+      if (c.gcalEventId) await deleteFromGcal(c.gcalEventId);
+    }
+  }
+  await window.deleteMTG(mtgId);
+  hideMTGDetail();
+}
+
+// ROLES定義（JS側でも使用）
+const ROLES = window.ROLES || {
+  admin:{label:'管理者'}, operator:{label:'オペレーター'},
+  ul:{label:'ユニットリーダー'}, sub_ul:{label:'準ユニットリーダー'},
+  instructor:{label:'講師'}, trainee:{label:'研修中'}
+};
+
+
+// 確定MTGのシフト自動追加・キャンセル時の自動削除チェック（ログイン時に実行）
+// 未回答MTG（招待されていて調整中・自分がまだ回答していない）を集計
+window._mtgUnanswered = [];
+async function computeMTGReminders(mtgListParam) {
+  const myEmail = window._currentUser?.email || '';
+  if (!myEmail || !window.fetchMTGList) { window._mtgUnanswered = []; renderMTGReminderUI(); return []; }
+  const mtgList = mtgListParam || await window.fetchMTGList();
+  const emailKey = escapeEmail(myEmail);
+  window._mtgUnanswered = mtgList.filter(mtg => {
+    if (mtg.status !== '調整中') return false;
+    if (!(mtg.invitees||[]).includes(myEmail)) return false;
+    const myResp = mtg.responses?.[emailKey] || mtg.responses?.[myEmail];
+    return !myResp;
+  });
+  renderMTGReminderUI();
+  return mtgList;
+}
+
+// 未回答MTGの通知表示（タブバッジ・MTGタブ内バナー・ホーム画面バナー）を更新
+function renderMTGReminderUI() {
+  const list = window._mtgUnanswered || [];
+  const count = list.length;
+
+  const badge = document.getElementById('mtg-tab-badge');
+  if (badge) {
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = count > 0 ? '' : 'none';
+  }
+
+  const mtgBanner = document.getElementById('mtg-invite-banner');
+  if (mtgBanner) {
+    if (count > 0) {
+      mtgBanner.style.display = '';
+      mtgBanner.innerHTML = `
+        <div style="background:var(--warning-bg);color:var(--warning-text);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;font-size:13px">
+          <div>📨 招待が届いています（回答待ち ${count}件）</div>
+          <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+            ${list.map(m => `<div style="cursor:pointer;text-decoration:underline" onclick="showMTGDetail('${m.id}')">・${m.title}</div>`).join('')}
+          </div>
+        </div>`;
+    } else {
+      mtgBanner.style.display = 'none';
+      mtgBanner.innerHTML = '';
+    }
+  }
+
+  const homeBanner = document.getElementById('home-mtg-reminder');
+  if (homeBanner) {
+    if (count > 0) {
+      homeBanner.style.display = '';
+      homeBanner.innerHTML = `
+        <div class="card" style="cursor:pointer;border-color:var(--warning-text);background:var(--warning-bg);padding:12px 16px" onclick="switchTab('mtg')">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-size:14px;font-weight:500;color:var(--warning-text)">📨 未回答のMTGが${count}件あります。今すぐ回答しましょう</div>
+            <span style="font-size:12px;color:var(--warning-text);white-space:nowrap">回答する ›</span>
+          </div>
+        </div>`;
+    } else {
+      homeBanner.style.display = 'none';
+      homeBanner.innerHTML = '';
+    }
+  }
+}
+
+let _mtgSyncInProgress = false;
+async function checkConfirmedMTGShifts() {
+  if (!window.fetchMTGList) return;
+  const myEmail = window._currentUser?.email || '';
+  if (!myEmail) return;
+  if (_mtgSyncInProgress) return; // onSnapshotの多重発火による重複実行を防止
+  _mtgSyncInProgress = true;
+  try {
+    const mtgList = await computeMTGReminders();
+    let changed = 0;
+
+    for (const mtg of mtgList) {
+      const isInvited = (mtg.invitees||[]).includes(myEmail);
+      const isCreator = mtg.createdBy === myEmail;
+      if (!isInvited && !isCreator) continue;
+      const s = mtg.confirmedShift;
+      if (!s) continue;
+
+      const emailKey = escapeEmail(myEmail);
+      const myResponse = mtg.responses?.[emailKey] || mtg.responses?.[myEmail] || null;
+      const myEventIds = myResponse?.gcalEventIds || {};
+      const hasPendingCleanup = Object.keys(myEventIds).length > 0;
+
+      if (mtg.status === '確定' && isInvited && !isCreator) {
+        // 確定した日時が自分の回答した「参加可能」候補に含まれているかどうか
+        const iAmAttending = !!(myResponse && (myResponse.candidates||[]).includes(mtg.confirmedCandidate));
+
+        if (iAmAttending) {
+          // 参加する場合のみシフトに追加
+          const alreadyAdded = shifts.some(sh =>
+            sh.date === s.date && sh.start === s.start && sh.memo === s.title && sh.type === (s.type || 'mtg')
+          );
+          if (!alreadyAdded) {
+            let gcalEventId = myEventIds[mtg.confirmedCandidate] || null;
+            if (window._gcalToken) {
+              try {
+                if (gcalEventId) {
+                  // 自分が回答時に仮登録していたイベントを「確定」表記に更新
+                  await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalEventId}`, {
+                    method:'PATCH',
+                    headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+                    body:JSON.stringify({ summary:`【${mtgCalLabel(s.type)}確定】${s.title}`, colorId:'10' })
+                  });
+                } else {
+                  // 仮登録が無かった場合のフォールバックとして新規作成
+                  const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+                    method:'POST',
+                    headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+                    body:JSON.stringify({
+                      summary:`【${mtgCalLabel(s.type)}確定】${s.title}`,
+                      start:{dateTime:`${s.date}T${s.start}:00`,timeZone:'Asia/Tokyo'},
+                      end:{dateTime:`${s.date}T${s.end}:00`,timeZone:'Asia/Tokyo'},
+                      colorId:'10',
+                      reminders:{useDefault:false,overrides:[{method:'popup',minutes:10}]}
+                    })
+                  });
+                  const data = await res.json();
+                  gcalEventId = data.id || null;
+                }
+              } catch(e) { console.warn('MTG確定イベントの更新に失敗', e); }
+            }
+            shifts.push({
+              id:Date.now()+Math.random(), type: s.type || 'mtg',
+              date:s.date, start:s.start, end:s.end,
+              memo:s.title, closed:false, gcalEventId
+            });
+            changed++;
+          }
+          // 確定しなかった他の候補の仮登録を自分のカレンダーから削除
+          if (window._gcalToken) {
+            for (const [cid, eid] of Object.entries(myEventIds)) {
+              if (cid !== mtg.confirmedCandidate && eid) {
+                try { await deleteFromGcal(eid); } catch(e) {}
+              }
+            }
+          }
+          if (hasPendingCleanup) {
+            await window.updateMTG(mtg.id, { [`responses.${emailKey}.gcalEventIds`]: { [mtg.confirmedCandidate]: myEventIds[mtg.confirmedCandidate] || null } });
+          }
+        } else if (hasPendingCleanup) {
+          // 不参加になった場合：シフトには登録せず、自分が仮登録した候補をすべて片付ける
+          if (window._gcalToken) {
+            for (const eid of Object.values(myEventIds)) {
+              if (eid) { try { await deleteFromGcal(eid); } catch(e) {} }
+            }
+          }
+          await window.updateMTG(mtg.id, { [`responses.${emailKey}.gcalEventIds`]: {} });
+        }
+      } else if (mtg.status === 'キャンセル') {
+        // キャンセルされたMTGをシフトから削除
+        const idx = shifts.findIndex(sh =>
+          sh.date === s.date && sh.start === s.start && sh.memo === s.title && sh.type === (s.type || 'mtg')
+        );
+        if (idx !== -1) {
+          const gcalId = shifts[idx].gcalEventId;
+          if (gcalId && window._gcalToken) { try { await deleteFromGcal(gcalId); } catch(e) {} }
+          shifts.splice(idx, 1);
+          changed++;
+        }
+        // 自分が仮登録していた候補もすべて片付ける
+        if (hasPendingCleanup) {
+          if (window._gcalToken) {
+            for (const eid of Object.values(myEventIds)) {
+              if (eid) { try { await deleteFromGcal(eid); } catch(e) {} }
+            }
+          }
+          await window.updateMTG(mtg.id, { [`responses.${emailKey}.gcalEventIds`]: {} });
+        }
+      }
+    }
+
+    if (changed > 0) {
+      save();
+      renderShifts();renderMetrics();renderHome();
+    }
+  } catch(e) { console.warn('checkConfirmedMTGShifts error', e); }
+  finally { _mtgSyncInProgress = false; }
+}
 
 // ── Q&A管理（Firebase対応） ──
 async function loadQAFromFirebase() {
