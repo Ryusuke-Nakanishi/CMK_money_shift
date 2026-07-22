@@ -1,78 +1,53 @@
-# シフト・請求書管理アプリ
+# CMKシフト管理 - Vite移行版
 
-## ファイル構成
+## セットアップ（最初の1回だけ）
 
 ```
-shift-app/
-├── index.html     ← メインアプリ
-├── sw.js          ← Service Worker（オフライン対応・自動更新）
-├── manifest.json  ← PWA設定
-├── icon-192.png   ← アプリアイコン（小）
-├── icon-512.png   ← アプリアイコン（大）
-└── README.md
+npm install
 ```
 
----
+## 開発中の確認方法
 
-## GitHubへのアップロード手順
+```
+npm run dev
+```
+表示されるURL（`http://localhost:5173`など）をブラウザで開いて確認します。
+コードを保存すると自動で画面が更新されます。
 
-1. GitHubで新しいリポジトリを作成（例: `shift-app`）
-2. このフォルダの全ファイルをアップロード
-   - GitHubのリポジトリページ →「Add file」→「Upload files」
-   - 全ファイルをドラッグ&ドロップ → Commit
+スマホの実機で確認したい場合は、PCとスマホを同じWi-Fiに繋いだ上で：
+```
+npm run dev -- --host
+```
+と実行し、ターミナルに出る「Network:」の方のURLをスマホのブラウザで開いてください。
 
----
+## 本番用にビルドする
 
-## Netlifyで公開する手順
+```
+npm run build
+```
+`dist`フォルダに、公開用の完成したファイル一式が生成されます。
+`npm run preview` でこの本番ビルドをローカルで確認できます。
 
-1. [netlify.com](https://netlify.com) にアクセス → 無料アカウント作成
-2. 「Add new site」→「Import an existing project」
-3. 「GitHub」を選択 → リポジトリ（shift-app）を選択
-4. Build設定はそのまま「Deploy site」をクリック
-5. `https://xxxxxxxx.netlify.app` のURLが発行される
+## デプロイ前に必ずやること（重要）
 
----
+このzipには含まれていない、既存プロジェクトのファイルを `public/` フォルダにコピーしてください：
 
-## スマホ・PCへのインストール方法
+- `manifest.json`
+- `icon-192.png`
+- `icon-512.png`
+- `privacy.html`
+- `terms.html`
 
-### iPhone（Safari）
-1. Safariで公開URLを開く
-2. 画面下の共有ボタン（□↑）をタップ
-3. 「ホーム画面に追加」→「追加」
-4. ホーム画面にアプリとして表示される
+これらは今のGitHubリポジトリに入っているはずです。`public/`フォルダに入れたファイルは、ビルド時にそのまま`dist`フォルダのトップに複製されます。
 
-### Android（Chrome）
-1. Chromeで公開URLを開く
-2. アドレスバー右のメニュー → 「アプリをインストール」
+## Netlifyの設定
 
-### Mac / Windows（Chrome）
-1. Chromeで公開URLを開く
-2. アドレスバー右のインストールアイコン（⊕）をクリック
-3. 「インストール」→ デスクトップアプリとして起動可能
+- Build command: `npm run build`
+- Publish directory: `dist`
 
----
+## 移行の中身について
 
-## バージョンアップ方法
-
-1. `index.html` の `APP_VERSION` を更新（例: `'1.0.0'` → `'1.1.0'`）
-2. `sw.js` の `CACHE_NAME` を更新（例: `'shift-app-v1.0.0'` → `'shift-app-v1.1.0'`）
-3. GitHubに更新ファイルをアップロード（push）
-4. Netlifyが自動でデプロイ → 全ユーザーのアプリに「更新ボタン」が表示される
-
----
-
-## Google カレンダー連携の設定
-
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
-2. 「APIとサービス」→「認証情報」→「OAuth 2.0 クライアントID」を作成
-   - アプリの種類: ウェブアプリケーション
-   - 承認済みのJavaScript生成元: `https://あなたのサイト.netlify.app`
-3. クライアントIDをアプリの「設定」タブに入力
-
----
-
-## データについて
-
-- データは各ユーザーのブラウザ（localStorage）に保存されます
-- 「設定」→「エクスポート」でJSONファイルに書き出し、別デバイスへ移行可能
-- 複数人が同じURLを使っても、データは各自のデバイスに独立して保存されます
+- 見た目・機能は今までと同じです（デザインは変更していません）
+- Firebase・Firestoreの設定はそのまま。変わったのはCDN読み込みからnpmパッケージ経由に変えた点だけです
+- 講師評価まわりのReactコンポーネントは、これまでのBabel Standalone（ブラウザ内でのその場変換）をやめ、Viteが標準でJSXをコンパイルする形に変更しました
+- 移行作業中に、コード内で偶然見つかった小さな重複バグ（`loadQAFromFirebase`が2重定義されていた）も直しています

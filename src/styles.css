@@ -1,0 +1,122 @@
+:root{--bg:#fff;--bg2:#f5f5f5;--bg3:#eee;--text:#111;--text2:#666;--text3:#999;--border:rgba(0,0,0,.12);--border2:rgba(0,0,0,.22);--accent:#111;--accent-text:#fff;--success-bg:#edfaef;--success-text:#1a7a32;--danger-bg:#fdecea;--danger-text:#c0392b;--warning-bg:#fff8e1;--warning-text:#b45309;--close-color:#d97706;--radius:10px;--radius-sm:6px}
+/* iOSで入力欄タップ時に自動ズームされるのを防ぐため、フォームの部品は最低16pxを保証する（型崩れの主因対策） */
+input,select,textarea{font-size:16px}
+@media(prefers-color-scheme:dark){:root{--bg:#111;--bg2:#1e1e1e;--bg3:#2a2a2a;--text:#f0f0f0;--text2:#aaa;--text3:#666;--border:rgba(255,255,255,.1);--border2:rgba(255,255,255,.2);--accent:#f0f0f0;--accent-text:#111;--success-bg:#0d2e14;--success-text:#4ade80;--danger-bg:#2e0d0d;--danger-text:#f87171;--warning-bg:#2e1f00;--warning-text:#fbbf24;--close-color:#fbbf24}.gcal-badge{background:#1a3a2a;color:#4ade80}.closed-badge{background:#2e1f00;color:#fbbf24}.form-group input[type="time"],.form-group input[type="date"],.form-group input[type="month"]{color:#f0f0f0;-webkit-text-fill-color:#f0f0f0;background:#1e1e1e}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+#update-banner{position:fixed;top:0;left:0;right:0;background:var(--accent);color:var(--accent-text);font-size:13px;padding:10px 16px;z-index:9999;display:none;align-items:center;justify-content:space-between;gap:8px}
+#update-banner button{background:var(--accent-text);color:var(--accent);border:none;border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer}
+.header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:.5px solid var(--border)}
+#status-bar{display:none;max-width:100%;padding:6px 16px;font-size:12px;align-items:center;gap:6px}
+.header-inner{max-width:720px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
+.header h1{font-size:17px;font-weight:600}
+.version-badge{font-size:11px;color:var(--text3);background:var(--bg3);padding:2px 8px;border-radius:20px}
+.tabs{max-width:720px;margin:0 auto;display:flex;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1 0 auto;min-width:64px;padding:10px 8px;font-size:11px;text-align:center;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab.active{color:var(--text);border-bottom-color:var(--text);font-weight:500}
+.content{max-width:720px;margin:0 auto;padding:12px;display:flex;flex-direction:column;gap:12px;overflow-x:hidden;box-sizing:border-box;width:100%}
+.panel{display:none}
+.panel.active{display:flex;flex-direction:column;gap:14px}
+.card details>summary{transition:color .15s}
+.card details>summary .chev{display:inline-block;transition:transform .15s}
+.card details[open]>summary .chev{transform:rotate(90deg)}
+.card{background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;overflow:hidden;box-sizing:border-box;width:100%}
+.section-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.metric-card{background:var(--bg2);border-radius:var(--radius-sm);padding:12px}
+.metric-card .label{font-size:11px;color:var(--text2);margin-bottom:4px;line-height:1.3}
+.metric-card .value{font-size:18px;font-weight:600}
+.form-grid{display:flex;flex-wrap:wrap;gap:8px;min-width:0;width:100%;box-sizing:border-box}.form-grid>.form-group{flex:1 1 calc(50% - 4px);min-width:0}@media(max-width:480px){.form-grid>.form-group{flex:1 1 100%}.form-grid-time>.form-group{flex:1 1 100%}}
+.form-group{display:flex;flex-direction:column;gap:4px;min-width:0;width:100%;overflow:hidden;position:relative}
+/* 以下、日付・時刻入力欄の見た目調整はタッチ操作端末(スマホ・タブレット)限定。
+   PCなどマウス操作の端末には一切適用せず、ブラウザ標準の挙動をそのまま使う
+   （appearance:noneはタッチ端末側の型崩れ対策として必要だが、PCではクリック機能を壊すことがあるため） */
+@media (hover:none) and (pointer:coarse) {
+  .form-group:has(input[type="date"])::after,.form-group:has(input[type="month"])::after{content:'📅';position:absolute;right:12px;bottom:11px;font-size:16px;pointer-events:none;line-height:1}
+  .form-group:has(input[type="time"])::after{content:'🕐';position:absolute;right:12px;bottom:11px;font-size:16px;pointer-events:none;line-height:1}
+  .form-group input[type="date"]::-webkit-calendar-picker-indicator,.form-group input[type="month"]::-webkit-calendar-picker-indicator,.form-group input[type="time"]::-webkit-calendar-picker-indicator{opacity:0;background:transparent}
+  .form-group input[type="date"],.form-group input[type="month"],.form-group input[type="time"]{-webkit-appearance:none;appearance:none;display:block;line-height:1.25;padding-right:34px}
+}
+.form-group input:focus,.form-group select:focus{outline:2px solid var(--accent);outline-offset:1px}.form-group input[type="date"],.form-group input[type="month"],.form-group input[type="time"]{color-scheme:light;width:100%;max-width:100%;box-sizing:border-box;-webkit-box-sizing:border-box}
+@media(prefers-color-scheme:dark){.form-group input[type="date"],.form-group input[type="month"],.form-group input[type="time"]{color-scheme:dark}}
+.form-group label{font-size:12px;color:var(--text2)}
+.form-group input,.form-group select{font-size:16px;padding:9px 11px;border:.5px solid var(--border2);border-radius:var(--radius-sm);background:var(--bg);color:var(--text);width:100%;min-width:0;max-width:100%;box-sizing:border-box;min-height:44px}
+.btn{padding:9px 16px;border-radius:var(--radius-sm);border:.5px solid var(--border2);background:var(--bg);color:var(--text);font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;font-family:inherit}
+.btn:active{opacity:.7}
+.btn-primary{background:var(--accent);color:var(--accent-text);border-color:var(--accent);font-weight:500}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-edit{color:var(--text2);border-color:var(--border2);font-size:12px;padding:4px 8px}
+.btn-danger{color:var(--danger-text);border-color:var(--danger-text)}
+.btn-warn{color:var(--warning-text);border-color:var(--close-color);font-size:12px;padding:5px 10px}
+.btn-reopen{color:var(--success-text);border-color:var(--success-text);font-size:12px;padding:5px 10px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.alert{border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;display:flex;gap:8px;align-items:flex-start;margin-bottom:6px}
+.alert-danger{background:var(--danger-bg);color:var(--danger-text);border:.5px solid var(--danger-text)}
+.month-nav{display:flex;align-items:center;gap:8px}
+.month-nav span{font-size:15px;font-weight:500;min-width:80px;text-align:center}
+.shift-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:.5px solid var(--border)}
+.shift-item:last-child{border-bottom:none}
+.shift-item.has-conflict{background:var(--danger-bg);border-radius:var(--radius-sm);padding:10px 8px;margin-bottom:2px;border-bottom:none}
+.shift-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.shift-body{flex:1;min-width:0}
+.shift-title{font-size:14px;font-weight:500;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.shift-sub{font-size:12px;color:var(--text2);margin-top:2px}
+.shift-actions{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:120px}
+.closed-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--warning-bg);color:var(--warning-text);font-weight:500;white-space:nowrap}
+.gcal-badge{font-size:11px;padding:2px 6px;border-radius:20px;background:var(--success-bg);color:var(--success-text);font-weight:500;filter:none}
+.conflict-badge{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--danger-bg);color:var(--danger-text);font-weight:500;white-space:nowrap}
+.invoice-out{font-family:'Courier New',monospace;font-size:14px;line-height:2;white-space:pre-wrap;background:var(--bg2);border-radius:var(--radius-sm);padding:14px;color:var(--text);min-height:160px}
+.week-block{border:.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden}
+.week-header{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--bg2);cursor:pointer;font-size:14px;font-weight:500}
+.week-body{padding:10px 12px;display:none}
+.week-body.open{display:block}
+.day-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.day-btn{width:36px;height:36px;border-radius:50%;border:.5px solid var(--border2);background:var(--bg);color:var(--text2);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .1s}
+.day-btn.on{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+.day-btn:disabled{opacity:.3;cursor:default}
+.rate-note{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.5}
+.divider{height:.5px;background:var(--border);margin:12px 0}
+.flash{font-size:13px;margin-top:8px;display:none;padding:6px 10px;border-radius:var(--radius-sm)}
+.flash.ok{background:var(--success-bg);color:var(--success-text);display:block}
+.flash.err{background:var(--danger-bg);color:var(--danger-text);display:block}
+.year-nav{display:flex;align-items:center;gap:8px}
+.year-nav span{font-size:15px;font-weight:500;min-width:60px;text-align:center}
+.annual-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}@media(max-width:480px){.annual-summary{grid-template-columns:repeat(2,1fr)}}
+.annual-card{background:var(--bg2);border-radius:var(--radius-sm);padding:12px}
+.annual-card .label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.annual-card .value{font-size:18px;font-weight:600}
+.progress-bar-wrap{background:var(--bg3);border-radius:20px;height:8px;margin-top:8px;overflow:hidden}
+.progress-bar-fill{height:100%;border-radius:20px;background:var(--accent);transition:width .4s}
+.monthly-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border);font-size:14px}
+.monthly-row:last-child{border-bottom:none}
+.rate-history-item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:.5px solid var(--border);font-size:13px}
+.rate-history-item:last-child{border-bottom:none}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg);border-radius:var(--radius);padding:20px;width:100%;max-width:400px}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+/* ホーム */
+.today-shift-item{display:flex;align-items:center;gap:12px;padding:12px;background:var(--bg2);border-radius:var(--radius-sm);margin-bottom:8px}
+.today-shift-item:last-child{margin-bottom:0}
+.no-shift{text-align:center;padding:24px;color:var(--text3);font-size:14px}
+/* ミニカレンダー */
+.mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.mini-cal-day-header{font-size:11px;color:var(--text3);padding:4px 0}
+.mini-cal-day{font-size:12px;padding:6px 2px;border-radius:var(--radius-sm);position:relative}
+.mini-cal-day.today{background:var(--accent);color:var(--accent-text);font-weight:700}
+.mini-cal-day.has-shift::after{content:'';position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--success-text)}
+.mini-cal-day.today.has-shift::after{background:var(--accent-text)}
+.mini-cal-day.other-month{color:var(--text3)}
+.mini-cal-day.sun{color:var(--danger-text)}
+.mini-cal-day.sat{color:#2563eb}
+.mini-cal-day.today.sun,.mini-cal-day.today.sat{color:var(--accent-text)}
+/* マニュアル */
+.manual-section{margin-bottom:16px}
+.manual-section h3{font-size:15px;font-weight:600;margin-bottom:8px}
+.manual-section p,.manual-section li{font-size:13px;color:var(--text2);line-height:1.7;margin-bottom:4px}
+.manual-section ul{padding-left:20px}
+/* ユーザー情報 */
+.user-info{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+  @keyframes chatFadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}

@@ -1,0 +1,20 @@
+/* flatpickrのポップアップを、アプリ既存のCSS変数(--bg, --text など)に合わせて調整する */
+.flatpickr-calendar{
+  background:var(--bg);
+  border:.5px solid var(--border2);
+  border-radius:var(--radius-sm);
+  box-shadow:0 8px 24px rgba(0,0,0,0.15);
+}
+.flatpickr-time{
+  background:var(--bg);
+}
+.flatpickr-time input{
+  color:var(--text);
+  background:var(--bg);
+  font-size:16px;
+}
+.flatpickr-time .numInputWrapper span.arrowUp:after{border-bottom-color:var(--text2)}
+.flatpickr-time .numInputWrapper span.arrowDown:after{border-top-color:var(--text2)}
+.flatpickr-time .numInputWrapper:hover{background:var(--bg2)}
+.flatpickr-time .flatpickr-am-pm{color:var(--text)}
+.flatpickr-time .flatpickr-time-separator{color:var(--text)}

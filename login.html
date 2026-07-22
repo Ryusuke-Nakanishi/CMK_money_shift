@@ -7,106 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>ログイン | ClassmallKids シフト管理</title>
-<script type="module">
-  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
-  import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged }
-    from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-
-  const firebaseConfig = {
-    apiKey: "AIzaSyB4JpPFCP0tigTHFaHkwVihEBfa24-oaJ8",
-    authDomain: "shift-app-1fa59.firebaseapp.com",
-    projectId: "shift-app-1fa59",
-    storageBucket: "shift-app-1fa59.firebasestorage.app",
-    messagingSenderId: "1014397065555",
-    appId: "1:1014397065555:web:d681d7b76c565313b569a6"
-  };
-
-  const app  = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-
-  // すでに有効なトークンがあればリダイレクト
-  const expiresAt = localStorage.getItem('gcal_token_expires');
-  const token     = localStorage.getItem('gcal_token');
-  if (token && expiresAt && Date.now() < parseInt(expiresAt)) {
-    window.location.href = '/';
-  }
-
-  // URLパラメータでエラー表示
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('error') === 'not_allowed') {
-    document.getElementById('login-error').textContent = 'このアカウントはアプリの利用が許可されていません。管理者にお問い合わせください。';
-    document.getElementById('login-error').style.display = 'block';
-  }
-
-  window.doLogin = async function() {
-    const btn = document.getElementById('login-btn');
-    btn.disabled = true;
-    btn.textContent = 'ログイン中...';
-    document.getElementById('login-error').style.display = 'none';
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.addScope('https://www.googleapis.com/auth/calendar.events');
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (credential && credential.accessToken) {
-        const accessToken = credential.accessToken;
-        // tokeninfo APIでexpiresAtを取得
-        try {
-          const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${accessToken}`);
-          const info = await res.json();
-          const expiresIn = info.expires_in || 3600;
-          const expiresAt = Date.now() + (expiresIn * 1000);
-          localStorage.setItem('gcal_token', accessToken);
-          localStorage.setItem('gcal_token_expires', expiresAt);
-          localStorage.setItem('gcal_uid', result.user.uid);
-          localStorage.setItem('login_time', Date.now());
-        } catch(e) {
-          // tokeninfo失敗時は3600秒（1時間）でフォールバック
-          const expiresAt = Date.now() + (3600 * 1000);
-          localStorage.setItem('gcal_token', accessToken);
-          localStorage.setItem('gcal_token_expires', expiresAt);
-          localStorage.setItem('gcal_uid', result.user.uid);
-          localStorage.setItem('login_time', Date.now());
-        }
-        window.location.href = '/';
-      } else {
-        throw new Error('トークンの取得に失敗しました');
-      }
-    } catch(e) {
-      if (e.code !== 'auth/popup-closed-by-user') {
-        document.getElementById('login-error').textContent = 'ログインに失敗しました: ' + e.message;
-        document.getElementById('login-error').style.display = 'block';
-      }
-      btn.disabled = false;
-      btn.textContent = 'Googleアカウントでログイン';
-    }
-  };
-</script>
-<style>
-  :root {
-    --bg:#ffffff;--bg2:#f5f5f5;--text:#111111;--text2:#666666;--text3:#999999;
-    --border:rgba(0,0,0,0.12);--accent:#111111;--accent-text:#ffffff;
-    --danger-bg:#fdecea;--danger-text:#c0392b;--radius:10px;--radius-sm:6px;
-  }
-  @media(prefers-color-scheme:dark){
-    :root{--bg:#111111;--bg2:#1e1e1e;--text:#f0f0f0;--text2:#aaaaaa;--text3:#666666;--border:rgba(255,255,255,0.1);--accent:#f0f0f0;--accent-text:#111111;--danger-bg:#2e0d0d;--danger-text:#f87171;}
-  }
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
-  .login-card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:32px 24px;width:100%;max-width:360px;text-align:center;}
-  .app-icon{width:64px;height:64px;background:var(--accent);border-radius:16px;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:28px;}
-  .app-name{font-size:18px;font-weight:700;margin-bottom:4px;}
-  .app-sub{font-size:13px;color:var(--text2);margin-bottom:28px;}
-  .login-btn{width:100%;padding:12px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;font-family:inherit;font-weight:500;transition:background .15s;}
-  .login-btn:hover{background:var(--bg2);}
-  .login-btn:disabled{opacity:0.6;cursor:not-allowed;}
-  .login-btn svg{width:20px;height:20px;flex-shrink:0;}
-  .error{background:var(--danger-bg);color:var(--danger-text);font-size:13px;padding:8px 12px;border-radius:var(--radius-sm);margin-top:12px;display:none;text-align:left;}
-  .note{font-size:12px;color:var(--text3);margin-top:20px;line-height:1.6;}
-  .footer-links{margin-top:24px;font-size:12px;color:var(--text3);}
-  .footer-links a{color:var(--text3);text-decoration:none;margin:0 8px;}
-</style>
+<link rel="stylesheet" href="/src/login.css">
 </head>
 <body>
 <div class="login-card">
@@ -129,5 +30,6 @@
     <a href="/terms.html">利用規約</a>
   </div>
 </div>
+<script type="module" src="/src/login.js"></script>
 </body>
 </html>
