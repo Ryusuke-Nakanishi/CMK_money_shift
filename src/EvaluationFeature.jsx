@@ -3,6 +3,28 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import Chart from 'chart.js/auto';
 
+// ── 評価担当範囲（準ULが見る・付けられる講師を絞り込む） ──
+// メインコースは、明示的にisMainがある場合はそれ、なければ優先順位が最も高いものを使う
+function mainCourseOf(user) {
+  const list = user.courses || [];
+  return list.find(c => c.isMain) || list.slice().sort((a,b)=>(a.priority||99)-(b.priority||99))[0] || null;
+}
+// 準UL(subUl)が、staffを評価対象にできるかどうかを判定する。
+// ユニット・メインコース・個別指定のいずれかに当てはまれば対象（条件が1つも設定されていなければ、安全側で対象外）
+function isInEvaluationScope(subUl, staff) {
+  const scope = subUl.evaluationScope || {};
+  const units = scope.units || [];
+  const courses = scope.courses || [];
+  const extraEmails = scope.extraEmails || [];
+  if (extraEmails.includes(staff.email)) return true;
+  if (units.length && (staff.units || []).some(a => units.includes(a.unit))) return true;
+  if (courses.length) {
+    const main = mainCourseOf(staff);
+    if (main && courses.includes(main.course)) return true;
+  }
+  return false;
+}
+
 const EVAL_CATEGORIES = [
   { key: 'キャラクター', items: ['テンション','リアクション','表情','親しみ','声のトーン・明瞭さ','ユーモア'] },
   { key: 'コーチング', items: ['話し方','進め方','共感・傾聴','呼びかけ・励まし','柔軟性'] },
@@ -333,6 +355,100 @@ function MyEvaluationPage() {
 const thStyle = { textAlign:'left', fontSize:11, color:'var(--text2)', fontWeight:500, padding:'8px 8px' };
 const tdStyle = { fontSize:12, padding:'8px 8px' };
 
+// ── 準ULの評価担当範囲を設定するパネル（UL以上向け） ──
+function EvaluationScopePanel({ users, onSaved }) {
+  const [editingEmail, setEditingEmail] = React.useState(null);
+  const subUls = users.filter(u => u.role === 'sub_ul');
+
+  if (!subUls.length) return <p style={{ fontSize:12, color:'var(--text3)' }}>準ユニットリーダーがまだいません</p>;
+
+  return (
+    <div>
+      <p style={{ fontSize:11, color:'var(--text3)', margin:'0 0 10px' }}>
+        準ユニットリーダーは、ここで設定した範囲（ユニット・メインコース・個別指定のいずれか）に当てはまる講師の評価だけを見る・付けることができます。何も設定されていない間は、誰の評価も見られません。
+      </p>
+      {subUls.map(u => (
+        <div key={u.email} style={{ borderBottom:'.5px solid var(--border)', padding:'8px 0' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+            <span style={{ flex:1, fontSize:13 }}>{u.name || u.email}</span>
+            <span style={{ fontSize:11, color:'var(--text3)' }}>
+              {(u.evaluationScope?.units?.length || u.evaluationScope?.courses?.length || u.evaluationScope?.extraEmails?.length)
+                ? '範囲設定済み' : '未設定'}
+            </span>
+            <button className="btn btn-sm" onClick={() => setEditingEmail(editingEmail === u.email ? null : u.email)}>
+              {editingEmail === u.email ? '閉じる' : '設定'}
+            </button>
+          </div>
+          {editingEmail === u.email && (
+            <EvaluationScopeEditor subUl={u} users={users} onSaved={async () => { await onSaved(); }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EvaluationScopeEditor({ subUl, users, onSaved }) {
+  const [units, setUnits] = React.useState(subUl.evaluationScope?.units || []);
+  const [courses, setCourses] = React.useState(subUl.evaluationScope?.courses || []);
+  const [extraEmails, setExtraEmails] = React.useState(subUl.evaluationScope?.extraEmails || []);
+  const [allUnits, setAllUnits] = React.useState([]);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => { if (window.fetchAllUnits) window.fetchAllUnits().then(setAllUnits); }, []);
+
+  function toggle(list, setList, value) {
+    setList(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
+  }
+  async function handleSave() {
+    setSaving(true);
+    await window.updateEvaluationScope(subUl.email, { units, courses, extraEmails });
+    setSaving(false);
+    onSaved();
+  }
+
+  const chk = { width:16, height:16 };
+  const labelStyle = { display:'flex', alignItems:'center', gap:6, fontSize:12, marginRight:12, marginBottom:6 };
+  const otherUsers = users.filter(u => u.email !== subUl.email);
+
+  return (
+    <div style={{ marginTop:8, padding:'10px 12px', background:'var(--bg2)', borderRadius:'var(--radius-sm)' }}>
+      <p style={{ fontSize:12, color:'var(--text2)', margin:'0 0 4px' }}>ユニット</p>
+      <div style={{ display:'flex', flexWrap:'wrap', marginBottom:8 }}>
+        {!allUnits.length && <span style={{ fontSize:12, color:'var(--text3)' }}>ユニットが未登録です</span>}
+        {allUnits.map(un => (
+          <label key={un.id} style={labelStyle}>
+            <input type="checkbox" checked={units.includes(un.id)} onChange={() => toggle(units, setUnits, un.id)} style={chk} />
+            {un.name}
+          </label>
+        ))}
+      </div>
+
+      <p style={{ fontSize:12, color:'var(--text2)', margin:'0 0 4px' }}>メインコース</p>
+      <div style={{ display:'flex', flexWrap:'wrap', marginBottom:8 }}>
+        {(window.COURSE_LIST || []).map(c => (
+          <label key={c.id} style={labelStyle}>
+            <input type="checkbox" checked={courses.includes(c.id)} onChange={() => toggle(courses, setCourses, c.id)} style={chk} />
+            {c.id}
+          </label>
+        ))}
+      </div>
+
+      <p style={{ fontSize:12, color:'var(--text2)', margin:'0 0 4px' }}>個別に対象へ追加する講師</p>
+      <div style={{ maxHeight:140, overflowY:'auto', border:'.5px solid var(--border)', borderRadius:'var(--radius-sm)', padding:8, marginBottom:10, background:'var(--bg)' }}>
+        {otherUsers.map(u => (
+          <label key={u.email} style={{ ...labelStyle, marginBottom:4 }}>
+            <input type="checkbox" checked={extraEmails.includes(u.email)} onChange={() => toggle(extraEmails, setExtraEmails, u.email)} style={chk} />
+            {u.name || u.email}
+          </label>
+        ))}
+      </div>
+
+      <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>{saving ? '保存中...' : '保存'}</button>
+    </div>
+  );
+}
+
 function EvalManageListPage({ jumpToEmail } = {}) {
   const [users, setUsers] = React.useState(null);
   const [allEvals, setAllEvals] = React.useState(null);
@@ -383,12 +499,15 @@ function EvalManageListPage({ jumpToEmail } = {}) {
   if (view.mode === 'detail' || view.mode === 'form') {
     const staff = users.find(u => u.email === view.email) || { email: view.email };
     const evals = evalsByEmail[view.email] || [];
+    if (myRole === 'sub_ul' && !isInEvaluationScope(window._currentUser || {}, staff)) {
+      return (
+        <div className="card">
+          <button className="btn btn-sm" onClick={() => setView({ mode:'list' })}>← 一覧に戻る</button>
+          <p style={{ fontSize:13, color:'var(--text2)', marginTop:12 }}>この講師の評価を見る・付ける権限がありません。担当範囲はユニットリーダーに確認してください。</p>
+        </div>
+      );
+    }
     return <StaffDetailPage staff={staff} evals={evals} view={view} setView={setView} onSaved={reload} />;
-  }
-
-  function mainCourseOf(user) {
-    const list = user.courses || [];
-    return list.find(c => c.isMain) || list.slice().sort((a,b)=>(a.priority||99)-(b.priority||99))[0] || null;
   }
 
   let rows = users.map(u => {
@@ -396,6 +515,7 @@ function EvalManageListPage({ jumpToEmail } = {}) {
     const latest = evals[0] || null;
     return { user:u, latest, overall: overallAverage(latest), mainCourse: mainCourseOf(u) };
   });
+  if (myRole === 'sub_ul') rows = rows.filter(r => isInEvaluationScope(window._currentUser || {}, r.user));
   if (search) rows = rows.filter(r => (r.user.name || r.user.email || '').includes(search));
   if (onlyStale) rows = rows.filter(r => !r.latest || (Date.now() - r.latest.evaluatedAt) > 1000*60*60*24*90);
   if (filterCourse) {
@@ -452,6 +572,18 @@ function EvalManageListPage({ jumpToEmail } = {}) {
           <button className="btn btn-sm" onClick={() => setShowAddPending(false)}>キャンセル</button>
           <p style={{ fontSize:11, color:'var(--text3)', width:'100%', margin:0 }}>メールアドレスが分かったら、個別ページから後で紐付けられます</p>
         </div>
+      )}
+
+      {canAddPending && (
+        <details style={{ border:'.5px solid var(--border)', borderRadius:'var(--radius-sm)', padding:'10px 12px', marginBottom:14 }}>
+          <summary style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', listStyle:'none', fontWeight:500, fontSize:14 }}>
+            <span className="chev" style={{ fontSize:12, color:'var(--text3)' }}>▸</span>
+            <span style={{ flex:1 }}>準ユニットリーダーの評価担当範囲</span>
+          </summary>
+          <div style={{ marginTop:10 }}>
+            <EvaluationScopePanel users={users} onSaved={reload} />
+          </div>
+        </details>
       )}
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12, alignItems:'center' }}>
         <input placeholder="名前で検索" value={search} onChange={e => setSearch(e.target.value)} style={{ width:160 }} />
@@ -726,7 +858,9 @@ function PendingLinkPanel({ staff, setView, onSaved }) {
 
 function StaffDetailPage({ staff, evals, view, setView, onSaved }) {
   const myRole = window._currentUser?.role || '';
-  const canManage = ['sub_ul','ul','operator','admin'].includes(myRole);
+  const canManage = myRole === 'sub_ul'
+    ? isInEvaluationScope(window._currentUser || {}, staff)
+    : ['ul','operator','admin'].includes(myRole);
   const canLinkEmail = ['ul','operator','admin'].includes(myRole);
   const [allUnits, setAllUnits] = React.useState([]);
   React.useEffect(() => { if (window.fetchAllUnits) window.fetchAllUnits().then(setAllUnits); }, []);

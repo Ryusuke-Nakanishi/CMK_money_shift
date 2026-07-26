@@ -132,6 +132,20 @@
       return snap.docs.map(d => ({ id: d.id, ...d.data() }));
     } catch(e) { console.warn('fetchMTGList error', e); return []; }
   };
+  // 自分が作成者、または招待メンバーに含まれているMTGだけを絞り込んで取得する
+  // （ログイン時の確認処理など、全件読み込みが不要な場面での読み取り量削減のために使う）
+  window.fetchMyRelevantMTGs = async function(email) {
+    try {
+      const [createdSnap, invitedSnap] = await Promise.all([
+        getDocs(query(collection(db, 'mtgList'), where('createdBy', '==', email))),
+        getDocs(query(collection(db, 'mtgList'), where('invitees', 'array-contains', email))),
+      ]);
+      const byId = {};
+      createdSnap.docs.forEach(d => { byId[d.id] = { id: d.id, ...d.data() }; });
+      invitedSnap.docs.forEach(d => { byId[d.id] = { id: d.id, ...d.data() }; });
+      return Object.values(byId);
+    } catch(e) { console.warn('fetchMyRelevantMTGs error', e); return []; }
+  };
   window.fetchMTG = async function(id) {
     try {
       const snap = await getDoc(doc(db, 'mtgList', id));
@@ -333,6 +347,164 @@
       return true;
     } catch(e) { console.warn('updateStaffUnits error', e); return false; }
   };
+  // 準ULの評価担当範囲を設定する（ユニット・メインコース・個別指定の組み合わせ、UL以上が設定）
+  window.updateEvaluationScope = async function(subUlEmail, scope) {
+    try {
+      await setDoc(doc(db, 'allowedUsers', subUlEmail), { evaluationScope: scope }, { merge: true });
+      return true;
+    } catch(e) { console.warn('updateEvaluationScope error', e); return false; }
+  };
+
+  // ── 研修項目（オリエンテーション・安全講習など。管理画面から自由に追加できる） ──
+  // 各項目のフィールド: name, isRequiredForPromotion, recorderRole('sub_ul'|'ul'),
+  //   targetRoles[], targetCourses[], targetUnits[], targetExtraEmails[], order
+  window.fetchTrainingItems = async function() {
+    try {
+      const snap = await getDocs(collection(db, 'trainingItems'));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a,b) => (a.order||99) - (b.order||99));
+    } catch(e) { console.warn('fetchTrainingItems error', e); return []; }
+  };
+  window.createTrainingItem = async function(data) {
+    try {
+      const ref = await addDoc(collection(db, 'trainingItems'), { ...data, createdAt: Date.now() });
+      return ref.id;
+    } catch(e) { console.warn('createTrainingItem error', e); return null; }
+  };
+  window.updateTrainingItem = async function(id, data) {
+    try {
+      await updateDoc(doc(db, 'trainingItems', id), data);
+      return true;
+    } catch(e) { console.warn('updateTrainingItem error', e); return false; }
+  };
+  // 研修項目の削除（関連する記録もまとめて削除する）
+  window.cascadeDeleteTrainingItem = async function(id) {
+    const result = { recordsDeleted:0, errors:[] };
+    try {
+      const recSnap = await getDocs(query(collection(db, 'trainingRecords'), where('itemId', '==', id)));
+      for (const d of recSnap.docs) { await deleteDoc(doc(db, 'trainingRecords', d.id)); result.recordsDeleted++; }
+      await deleteDoc(doc(db, 'trainingItems', id));
+    } catch(e) { result.errors.push('研修項目の削除に失敗: ' + e.message); }
+    return result;
+  };
+
+  // ── 研修記録（1項目につき複数回の挑戦を記録できる） ──
+  // 各記録のフィールド: itemId, staffEmail, date, attended(bool), result('pass'|'fail'|'pending'),
+  //   memo, recordedBy, recordedAt, shiftStart, shiftEnd
+  window.fetchAllTrainingRecords = async function() {
+    try {
+      const snap = await getDocs(collection(db, 'trainingRecords'));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchAllTrainingRecords error', e); return []; }
+  };
+  window.fetchTrainingRecordsForStaff = async function(staffEmail) {
+    try {
+      const snap = await getDocs(query(collection(db, 'trainingRecords'), where('staffEmail', '==', staffEmail)));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchTrainingRecordsForStaff error', e); return []; }
+  };
+  window.createTrainingRecord = async function(data) {
+    try {
+      const ref = await addDoc(collection(db, 'trainingRecords'), {
+        ...data,
+        recordedBy: auth.currentUser?.email || '',
+        recordedAt: Date.now(),
+      });
+      return ref.id;
+    } catch(e) { console.warn('createTrainingRecord error', e); return null; }
+  };
+  window.updateTrainingRecord = async function(id, data) {
+    try {
+      await updateDoc(doc(db, 'trainingRecords', id), { ...data, recordedAt: Date.now() });
+      return true;
+    } catch(e) { console.warn('updateTrainingRecord error', e); return false; }
+  };
+  window.deleteTrainingRecord = async function(id) {
+    try {
+      await deleteDoc(doc(db, 'trainingRecords', id));
+      return true;
+    } catch(e) { console.warn('deleteTrainingRecord error', e); return false; }
+  };
+
+  // ── 研修セッション（複数候補日程を用意し、対象者が自己選択 or トレーナーが割り当てる） ──
+  // フィールド: itemId, itemName, candidates[{id,date,start,end}], targetEmails[],
+  //   responses:{[emailKey]:{candidateId,respondedAt}}, assignments:{[emailKey]:candidateId},
+  //   status('調整中'|'確定'), createdBy, createdAt
+  window.fetchTrainingSessions = async function() {
+    try {
+      const snap = await getDocs(collection(db, 'trainingSessions'));
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch(e) { console.warn('fetchTrainingSessions error', e); return []; }
+  };
+  window.createTrainingSession = async function(data) {
+    try {
+      const ref = await addDoc(collection(db, 'trainingSessions'), {
+        ...data, status:'調整中', responses:{}, assignments:{},
+        createdBy: auth.currentUser?.email || '', createdAt: Date.now(),
+      });
+      return ref.id;
+    } catch(e) { console.warn('createTrainingSession error', e); return null; }
+  };
+  window.updateTrainingSession = async function(id, data) {
+    try {
+      await updateDoc(doc(db, 'trainingSessions', id), data);
+      return true;
+    } catch(e) { console.warn('updateTrainingSession error', e); return false; }
+  };
+  window.deleteTrainingSession = async function(id) {
+    try {
+      await deleteDoc(doc(db, 'trainingSessions', id));
+      return true;
+    } catch(e) { console.warn('deleteTrainingSession error', e); return false; }
+  };
+  // 対象者本人が希望日程を選ぶ（自己選択）
+  window.respondToTrainingSession = async function(sessionId, email, candidateId) {
+    try {
+      const key = window.escapeEmail(email);
+      await updateDoc(doc(db, 'trainingSessions', sessionId), {
+        [`responses.${key}`]: { candidateId, respondedAt: Date.now() },
+      });
+      return true;
+    } catch(e) { console.warn('respondToTrainingSession error', e); return false; }
+  };
+  // トレーナー側が特定の人を特定の候補日に割り当てる（自己選択の上書きにも使える）
+  window.assignTrainingSession = async function(sessionId, email, candidateId) {
+    try {
+      const key = window.escapeEmail(email);
+      await updateDoc(doc(db, 'trainingSessions', sessionId), {
+        [`assignments.${key}`]: candidateId,
+      });
+      return true;
+    } catch(e) { console.warn('assignTrainingSession error', e); return false; }
+  };
+  // 確定：各対象者の最終的な割当(トレーナー指定を優先、無ければ自己選択)をもとに研修記録(保留状態)を作成する
+  window.confirmTrainingSession = async function(sessionId) {
+    const result = { created:0, errors:[] };
+    try {
+      const snap = await getDoc(doc(db, 'trainingSessions', sessionId));
+      if (!snap.exists()) { result.errors.push('セッションが見つかりません'); return result; }
+      const data = snap.data();
+      const candidates = data.candidates || [];
+      for (const email of (data.targetEmails || [])) {
+        const key = window.escapeEmail(email);
+        const candidateId = (data.assignments || {})[key] || (data.responses || {})[key]?.candidateId;
+        if (!candidateId) continue;
+        const c = candidates.find(x => x.id === candidateId);
+        if (!c) continue;
+        try {
+          await addDoc(collection(db, 'trainingRecords'), {
+            itemId: data.itemId, itemName: data.itemName, staffEmail: email,
+            date: c.date, shiftStart: c.start, shiftEnd: c.end,
+            attended: null, result: 'pending', memo: '', sessionId,
+            recordedBy: auth.currentUser?.email || '', recordedAt: Date.now(),
+          });
+          result.created++;
+        } catch(e) { result.errors.push(`${email} の記録作成に失敗: ` + e.message); }
+      }
+      await updateDoc(doc(db, 'trainingSessions', sessionId), { status:'確定' });
+    } catch(e) { result.errors.push('確定処理に失敗: ' + e.message); }
+    return result;
+  };
 
   // 役職定義
   window.ROLES = {
@@ -461,6 +633,40 @@
       await setDoc(doc(db, 'allowedUsers', email), { ...snap.data(), role: newRole });
       return true;
     } catch(e) { console.warn('updateUserRole error', e); return false; }
+  };
+  // 表示名の修正（管理者・準UL以上向け）
+  window.updateStaffName = async function(email, name) {
+    try {
+      await setDoc(doc(db, 'allowedUsers', email), { name }, { merge: true });
+      return true;
+    } catch(e) { console.warn('updateStaffName error', e); return false; }
+  };
+
+  // ── メンテナンス告知（管理者が設定、ホーム画面バナー＋ログイン時ポップアップで表示） ──
+  window.fetchMaintenanceAnnouncement = async function() {
+    try {
+      const snap = await getDoc(doc(db, 'settings', 'maintenanceAnnouncement'));
+      return snap.exists() ? snap.data() : null;
+    } catch(e) { console.warn('fetchMaintenanceAnnouncement error', e); return null; }
+  };
+  window.updateMaintenanceAnnouncement = async function(data) {
+    try {
+      await setDoc(doc(db, 'settings', 'maintenanceAnnouncement'), { ...data, updatedAt: Date.now() });
+      return true;
+    } catch(e) { console.warn('updateMaintenanceAnnouncement error', e); return false; }
+  };
+  // 臨時メンテナンス（毎月の定期分とは別に、1回きりの日時で設定する）
+  window.fetchTemporaryMaintenance = async function() {
+    try {
+      const snap = await getDoc(doc(db, 'settings', 'temporaryMaintenance'));
+      return snap.exists() ? snap.data() : null;
+    } catch(e) { console.warn('fetchTemporaryMaintenance error', e); return null; }
+  };
+  window.updateTemporaryMaintenance = async function(data) {
+    try {
+      await setDoc(doc(db, 'settings', 'temporaryMaintenance'), { ...data, updatedAt: Date.now() });
+      return true;
+    } catch(e) { console.warn('updateTemporaryMaintenance error', e); return false; }
   };
 
   // 業務タイプ（教材開発・SNSマーケティングなど、役職とは別枠の権限付与に使う）

@@ -7,6 +7,7 @@ import './vendor-globals.js';
 import './firebase.js';
 import './legacy-app.js';
 import './EvaluationFeature.jsx';
+import './TrainingFeature.jsx';
 import { mountChatbot } from './Chatbot.jsx';
 
 mountChatbot();

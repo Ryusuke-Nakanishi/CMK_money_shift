@@ -105,6 +105,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
 .mini-cal-day-header{font-size:11px;color:var(--text3);padding:4px 0}
 .mini-cal-day{font-size:12px;padding:6px 2px;border-radius:var(--radius-sm);position:relative}
+.mini-cal-day.selected{outline:2px solid var(--accent);outline-offset:-2px}
 .mini-cal-day.today{background:var(--accent);color:var(--accent-text);font-weight:700}
 .mini-cal-day.has-shift::after{content:'';position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--success-text)}
 .mini-cal-day.today.has-shift::after{background:var(--accent-text)}

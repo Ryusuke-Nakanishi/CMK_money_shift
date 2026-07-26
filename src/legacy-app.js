@@ -1,10 +1,28 @@
-const APP_VERSION='3.5.4';
+const APP_VERSION='3.7.6';
 document.getElementById('ver-badge').textContent='v'+APP_VERSION+' 📢';
 document.getElementById('ver-display').textContent=APP_VERSION;
 
 // ── アップデート情報 ──
 // 新しい更新内容はこの配列の先頭に追加していく（新しい順に表示される）
 const CHANGELOG = [
+  { version:'3.6.0〜3.7.6', date:'2026-07-27', changes:[
+    '研修機能を追加しました。「研修」タブから、ご自身が対象の研修の進捗（合格・挑戦中・未受講）を確認できます',
+    '準ユニットリーダー以上は「研修管理」タブから、出欠・合否の記録ができます（記録できる役職は研修項目ごとに設定できます）',
+    '研修項目は管理画面から自由に追加・編集でき、対象者は役職・担当コース・所属ユニットの組み合わせ、または個別指定で設定できます',
+    '研修に出席した記録があると、次回アプリを開いた際に研修業務としてシフトへ自動追加されます',
+    '昇格に必須の研修をすべて修了すると、役職が「研修中」から「講師」へ自動的に更新されます',
+    '研修の日程調整機能を追加しました。複数の候補日程を用意し、対象者本人が希望日を選ぶ、またはトレーナー側が表形式で割り当てることができます（後からの対象者追加・除外にも対応）',
+    '研修管理タブに「研修マトリクス」を追加しました。講師 × 研修項目の一覧表で、全体の状況を一目で確認できます',
+    '管理タブから、ユーザーの表示名を修正できるようにしました',
+    'ログイン時のMTG確認処理の読み取り量を削減しました',
+    'ホーム画面のミニカレンダーの日付をタップすると、その日のシフトが表示されるようになりました',
+    'ダブルブッキングの警告が、ホーム画面にも表示されるようになりました',
+    '準ユニットリーダーの評価担当範囲を設定できるようにしました。ユニット・メインコース・個別指定の組み合わせで、担当する講師を絞り込めます',
+    'メンテナンス告知機能を追加しました。「毎月◯日」の形で繰り返し設定でき、指定した日数前からホーム画面・ログイン画面・ログイン時のポップアップで自動的に案内されます',
+    '毎月の定期メンテナンスとは別に、1回きりの「臨時メンテナンス」も案内できるようにしました（両方有効な場合は両方表示されます）',
+    'メンテナンス告知に「この期間中、実際にアプリの使用を制限する」設定を追加しました。有効にすると、実施時間中はアプリ画面の操作ができなくなります（admin/operatorは対象外）',
+    '（修正）使用制限中は管理者自身もログインできなくなる不具合を修正しました。ログイン自体は常に可能にし、ログイン後にアプリ側で役職を確認して制限するかどうかを判定するようにしました',
+  ]},
   { version:'3.5.4', date:'2026-07-22', changes:[
     '講師評価機能を追加しました。ご自身の評価が「講師評価」から確認できます（評価者が公開するまでは非表示になります）',
     '評価者に準ユニットリーダー以上の場合、「全講師評価管理」から評価の登録・確認ができます（担当コースの登録・優先順位設定、カテゴリごとの並び替え、コース・優先順位での絞り込みにも対応）',
@@ -102,12 +120,160 @@ window.onFirebaseDataLoaded=function(){
   ALL_RATE_KEYS.forEach(k=>{const el=document.getElementById('rate-'+k);if(el)el.value=rates[k]||'';});
   // 確定MTGのシフト自動追加チェック
   setTimeout(checkConfirmedMTGShifts, 1000);
+  // 研修記録のシフト自動追加・昇格判定チェック
+  setTimeout(checkTrainingSync, 1500);
+  // メンテナンス告知ポップアップの確認
+  setTimeout(checkMaintenancePopup, 800);
+  // 使用制限中かどうかを起動時に確認し、以降は5分おきに再確認する（利用中にメンテナンスが始まった場合に対応するため）
+  checkMaintenanceBlock();
+  if (!window._maintenanceBlockInterval) window._maintenanceBlockInterval = setInterval(checkMaintenanceBlock, 5*60*1000);
 };
 window.onAccountChanged=function(){
   shifts=[];rates={normal:0,camp:0,training:0,dev:0,mtg:0,sns:0,close:0};rateHistory=[];payments={};annualGoals={};
 };
 
 function renderAll(){renderShifts();renderMetrics();checkConflicts();renderAnnual();renderRateHistory();renderHome();}
+
+// ── メンテナンス告知（毎月◯日・時刻で繰り返し、指定日数前から表示） ──
+async function submitMaintenanceAnnouncement() {
+  const enabled = document.getElementById('maint-enabled').checked;
+  const block = document.getElementById('maint-block').checked;
+  const message = document.getElementById('maint-message').value.trim();
+  const dayOfMonth = parseInt(document.getElementById('maint-day').value) || null;
+  const daysBeforeToShow = parseInt(document.getElementById('maint-days-before').value) || 8;
+  const startTime = document.getElementById('maint-start-time').value || '00:00';
+  const endTime = document.getElementById('maint-end-time').value || '00:00';
+  if (enabled && !dayOfMonth) { showFlash('maint-msg','「毎月何日」を入力してください',false); return; }
+  const ok = await window.updateMaintenanceAnnouncement({ enabled, block, message, dayOfMonth, daysBeforeToShow, startTime, endTime });
+  showFlash('maint-msg', ok ? '保存しました' : '保存に失敗しました', ok);
+  if (ok) { renderHomeMaintenanceBanner(); checkMaintenanceBlock(); }
+}
+// 「毎月◯日 開始〜終了」の、直近の回（今月分がもう終わっていれば来月分）を計算する
+function nextMaintenanceOccurrence(a) {
+  const [sh,sm] = (a.startTime||'00:00').split(':').map(Number);
+  const [eh,em] = (a.endTime||'00:00').split(':').map(Number);
+  const now = new Date();
+  let end = new Date(now.getFullYear(), now.getMonth(), a.dayOfMonth, eh, em);
+  if (end < now) end = new Date(now.getFullYear(), now.getMonth()+1, a.dayOfMonth, eh, em);
+  const start = new Date(end.getFullYear(), end.getMonth(), a.dayOfMonth, sh, sm);
+  return { start, end };
+}
+// 今、告知を表示すべき期間内かどうかを判定する
+function isWithinMaintenanceWindow(a) {
+  if (!a.dayOfMonth) return false;
+  const { start, end } = nextMaintenanceOccurrence(a);
+  const displayStart = new Date(start);
+  displayStart.setDate(displayStart.getDate() - (a.daysBeforeToShow || 8));
+  displayStart.setHours(0,0,0,0);
+  const now = new Date();
+  return now >= displayStart && now <= end;
+}
+function fmtMaintOccurrence(a) {
+  const { start, end } = nextMaintenanceOccurrence(a);
+  const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const fmt=(d)=>`${d.getFullYear()}年${months[d.getMonth()]}${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  return `${fmt(start)} 〜 ${fmt(end)}`;
+}
+async function submitTemporaryMaintenance() {
+  const enabled = document.getElementById('temp-maint-enabled').checked;
+  const block = document.getElementById('temp-maint-block').checked;
+  const message = document.getElementById('temp-maint-message').value.trim();
+  const startAt = document.getElementById('temp-maint-start').value;
+  const endAt = document.getElementById('temp-maint-end').value;
+  const daysBeforeToShow = parseInt(document.getElementById('temp-maint-days-before').value) || 0;
+  if (enabled && (!startAt || !endAt)) { showFlash('temp-maint-msg','開始・終了日時を入力してください',false); return; }
+  const ok = await window.updateTemporaryMaintenance({ enabled, block, message, startAt, endAt, daysBeforeToShow });
+  showFlash('temp-maint-msg', ok ? '保存しました' : '保存に失敗しました', ok);
+  if (ok) { renderHomeMaintenanceBanner(); checkMaintenanceBlock(); }
+}
+function isWithinTemporaryWindow(t) {
+  if (!t.startAt || !t.endAt) return false;
+  const end = new Date(t.endAt);
+  const displayStart = new Date(t.startAt);
+  displayStart.setDate(displayStart.getDate() - (t.daysBeforeToShow || 0));
+  const now = new Date();
+  return now >= displayStart && now <= end;
+}
+function fmtTempOccurrence(t) {
+  const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const fmt=(v)=>{ const d=new Date(v); return `${d.getFullYear()}年${months[d.getMonth()]}${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+  return `${fmt(t.startAt)} 〜 ${fmt(t.endAt)}`;
+}
+// 「告知の表示（何日も前から）」とは別に、「実際に使用を制限する」のは実施時間そのものだけに限定する
+function isWithinMaintenanceBlockingWindow(a) {
+  if (!a.block || !a.dayOfMonth) return false;
+  const { start, end } = nextMaintenanceOccurrence(a);
+  const now = new Date();
+  return now >= start && now <= end;
+}
+function isWithinTemporaryBlockingWindow(t) {
+  if (!t.block || !t.startAt || !t.endAt) return false;
+  const now = new Date();
+  return now >= new Date(t.startAt) && now <= new Date(t.endAt);
+}
+// 使用制限中かどうかを確認し、該当すれば全画面のブロック表示に切り替える（すでにログイン中の人にも適用）
+// ただし、admin/operatorは制限中でも操作できるようにしておく（自分自身がロックアウトされて解除できなくなるのを防ぐため）
+async function checkMaintenanceBlock() {
+  const blockScreen = document.getElementById('maintenance-block-screen');
+  if (!blockScreen) return;
+  const myRole = window._currentUser?.role || '';
+  if (['admin','operator'].includes(myRole)) { blockScreen.style.display = 'none'; return; }
+  const [a, t] = await Promise.all([window.fetchMaintenanceAnnouncement(), window.fetchTemporaryMaintenance()]);
+  let message = '';
+  if (a && a.enabled && isWithinMaintenanceBlockingWindow(a)) message = a.message || 'メンテナンス中のため、ご利用いただけません。';
+  else if (t && t.enabled && isWithinTemporaryBlockingWindow(t)) message = t.message || 'メンテナンス中のため、ご利用いただけません。';
+  if (message) {
+    document.getElementById('maintenance-block-body').textContent = message;
+    blockScreen.style.display = 'flex';
+  } else {
+    blockScreen.style.display = 'none';
+  }
+}
+async function renderHomeMaintenanceBanner() {
+  const el = document.getElementById('home-maintenance-banner');
+  if (!el) return;
+  const [a, t] = await Promise.all([window.fetchMaintenanceAnnouncement(), window.fetchTemporaryMaintenance()]);
+  let html = '';
+  if (a && a.enabled && a.message && isWithinMaintenanceWindow(a)) {
+    html += `<div style="background:var(--warning-bg);color:var(--warning-text);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;margin-bottom:8px">
+      <strong>📢 お知らせ</strong><br><span style="font-weight:600">${fmtMaintOccurrence(a)}</span><br><span style="white-space:pre-wrap">${a.message}</span>
+    </div>`;
+  }
+  if (t && t.enabled && t.message && isWithinTemporaryWindow(t)) {
+    html += `<div style="background:var(--warning-bg);color:var(--warning-text);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;margin-bottom:8px">
+      <strong>📢 臨時のお知らせ</strong><br><span style="font-weight:600">${fmtTempOccurrence(t)}</span><br><span style="white-space:pre-wrap">${t.message}</span>
+    </div>`;
+  }
+  el.style.display = html ? '' : 'none';
+  el.innerHTML = html;
+}
+// ログイン時に一度だけ、メンテナンス告知のポップアップを表示する（回ごとに1回。次の回になれば再度表示する）
+async function checkMaintenancePopup() {
+  const [a, t] = await Promise.all([window.fetchMaintenanceAnnouncement(), window.fetchTemporaryMaintenance()]);
+  const bodies = [];
+  let key = '';
+  if (a && a.enabled && a.message && isWithinMaintenanceWindow(a)) {
+    const { start } = nextMaintenanceOccurrence(a);
+    bodies.push(fmtMaintOccurrence(a) + '\n' + a.message);
+    key += 'r:' + toLocalDateStr(start);
+  }
+  if (t && t.enabled && t.message && isWithinTemporaryWindow(t)) {
+    bodies.push(fmtTempOccurrence(t) + '\n' + t.message);
+    key += '|t:' + t.startAt;
+  }
+  if (!bodies.length) return;
+  const dismissedKey = localStorage.getItem('maintenanceDismissedOccurrence');
+  if (dismissedKey === key) return;
+  document.getElementById('maintenance-popup-body').textContent = bodies.join('\n\n');
+  const modal = document.getElementById('maintenance-popup');
+  modal.dataset.occurrenceKey = key;
+  modal.classList.add('open');
+}
+function closeMaintenancePopup() {
+  const modal = document.getElementById('maintenance-popup');
+  if (modal.dataset.occurrenceKey) localStorage.setItem('maintenanceDismissedOccurrence', modal.dataset.occurrenceKey);
+  modal.classList.remove('open');
+}
 
 function toLocalDateStr(dt){return`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
 function toMonthStr(yr,mo){return`${yr}-${String(mo+1).padStart(2,'0')}`;}
@@ -159,6 +325,8 @@ window.TAB_REGISTRY = [
   { id:'qa',         icon:'❓', label:'Q&A管理',        roles:['admin','operator','ul'] },
   { id:'evalManage', icon:'📊', label:'全講師評価管理', roles:['sub_ul','ul','operator','admin'] },
   { id:'unitList', icon:'🗂️', label:'ユニット一覧', roles:null },
+  { id:'training', icon:'🎓', label:'研修', roles:null },
+  { id:'trainingManage', icon:'📝', label:'研修管理', roles:['sub_ul','ul','operator','admin'] },
 ];
 window.DEFAULT_FAVORITE_TABS = ['shifts','mtg'];
 
@@ -278,6 +446,8 @@ function switchTab(t){
   if(t==='evaluation'&&typeof window.mountEvaluationTab==='function')window.mountEvaluationTab();
   if(t==='evalManage'&&typeof window.mountEvalManageTab==='function')window.mountEvalManageTab();
   if(t==='unitList'&&typeof window.mountUnitListTab==='function')window.mountUnitListTab();
+  if(t==='training'&&typeof window.mountTrainingTab==='function')window.mountTrainingTab();
+  if(t==='trainingManage'&&typeof window.mountTrainingManageTab==='function')window.mountTrainingManageTab();
 }
 
 // ユニット一覧などから、特定の講師の評価詳細ページへ直接ジャンプする
@@ -320,6 +490,7 @@ function renderHome(){
     <div class="metric-card"><div class="label">今月のコマ数</div><div class="value">${koma}コマ</div></div>
     <div class="metric-card"><div class="label">今月の概算報酬</div><div class="value">¥${Math.round(pay).toLocaleString()}</div></div>`;
   renderMiniCal();
+  renderHomeMaintenanceBanner();
 }
 
 function renderHomeShifts(){
@@ -431,19 +602,27 @@ function renderMiniCal(){
   const firstDay=new Date(yr,mo,1).getDay();
   const lastDate=new Date(yr,mo+1,0).getDate();
   const todayStr=toLocalDateStr(new Date());
+  const selectedStr=document.getElementById('home-date-picker')?.value||todayStr;
   const shiftDates=new Set(shifts.map(s=>s.date));
   let cells='';
   for(let i=0;i<firstDay;i++){const pd=new Date(yr,mo,-(firstDay-i-1));cells+=`<div class="mini-cal-day other-month">${pd.getDate()}</div>`;}
   for(let d=1;d<=lastDate;d++){
     const dateStr=`${yr}-${String(mo+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dow=new Date(yr,mo,d).getDay();
-    const cls=['mini-cal-day',dateStr===todayStr?'today':'',shiftDates.has(dateStr)?'has-shift':'',dow===0?'sun':dow===6?'sat':''].filter(Boolean).join(' ');
-    cells+=`<div class="${cls}">${d}</div>`;
+    const cls=['mini-cal-day',dateStr===todayStr?'today':'',dateStr===selectedStr?'selected':'',shiftDates.has(dateStr)?'has-shift':'',dow===0?'sun':dow===6?'sat':''].filter(Boolean).join(' ');
+    cells+=`<div class="${cls}" onclick="selectHomeDate('${dateStr}')" style="cursor:pointer">${d}</div>`;
   }
   document.getElementById('cal-grid').innerHTML=cells;
 }
 function calPrevMonth(){calMonth.setMonth(calMonth.getMonth()-1);renderMiniCal();}
 function calNextMonth(){calMonth.setMonth(calMonth.getMonth()+1);renderMiniCal();}
+// ミニカレンダーの日付をタップした時に、その日のシフトをホームタブに表示する
+function selectHomeDate(dateStr){
+  const picker=document.getElementById('home-date-picker');
+  if(picker)picker.value=dateStr;
+  renderHomeShifts();
+  renderMiniCal();
+}
 
 function addShift(){
   const type=document.getElementById('new-type').value;
@@ -580,7 +759,11 @@ function checkConflicts(){
   const sorted=[...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
   const conflicts=[];
   for(let i=0;i<sorted.length-1;i++){const a=sorted[i],b=sorted[i+1];if(a.date===b.date&&a.end>b.start)conflicts.push(`${a.date.slice(5).replace('-','/')} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);}
-  document.getElementById('conflict-zone').innerHTML=conflicts.length?`<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`:'';
+  const html=conflicts.length?`<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`:'';
+  const zone=document.getElementById('conflict-zone');
+  if(zone)zone.innerHTML=html;
+  const homeZone=document.getElementById('home-conflict-zone');
+  if(homeZone)homeZone.innerHTML=html?`<div style="margin-bottom:12px">${html}</div>`:'';
 }
 
 function getNthWeekday(yr,mo,week,day){
@@ -839,6 +1022,34 @@ async function renderAdminUserList() {
   const addPendingBtn = document.getElementById('admin-add-pending-btn');
   if (addPendingBtn) addPendingBtn.style.display = canAddPending ? '' : 'none';
 
+  // メンテナンス告知カードの表示制御（admin/operatorのみ）＋初期値の読み込み
+  const maintCard = document.getElementById('admin-maintenance-card');
+  if (maintCard) {
+    maintCard.style.display = canAddDelete ? '' : 'none';
+    if (canAddDelete && !maintCard._loaded) {
+      maintCard._loaded = true;
+      const a = await window.fetchMaintenanceAnnouncement();
+      if (a) {
+        document.getElementById('maint-enabled').checked = !!a.enabled;
+        document.getElementById('maint-block').checked = !!a.block;
+        document.getElementById('maint-message').value = a.message || '';
+        document.getElementById('maint-day').value = a.dayOfMonth || '';
+        document.getElementById('maint-days-before').value = a.daysBeforeToShow || 8;
+        document.getElementById('maint-start-time').value = a.startTime || '';
+        document.getElementById('maint-end-time').value = a.endTime || '';
+      }
+      const t = await window.fetchTemporaryMaintenance();
+      if (t) {
+        document.getElementById('temp-maint-enabled').checked = !!t.enabled;
+        document.getElementById('temp-maint-block').checked = !!t.block;
+        document.getElementById('temp-maint-message').value = t.message || '';
+        document.getElementById('temp-maint-start').value = t.startAt || '';
+        document.getElementById('temp-maint-end').value = t.endAt || '';
+        document.getElementById('temp-maint-days-before').value = t.daysBeforeToShow || 0;
+      }
+    }
+  }
+
   // コースフィルターの選択肢を用意（初回のみ）
   const courseSelect = document.getElementById('admin-filter-course');
   if (courseSelect && courseSelect.options.length <= 1 && window.COURSE_LIST) {
@@ -897,7 +1108,7 @@ async function renderAdminUserList() {
       </div>
       <span style="font-size:11px;padding:2px 10px;border-radius:20px;background:${roleBg};color:${roleColor};font-weight:500;white-space:nowrap">${roleLabel}</span>
       <div style="display:flex;gap:4px;flex-shrink:0">
-        ${canEditThisUser ? `<button class="btn btn-sm" onclick='openEditRoleModal(${JSON.stringify(u.email)},${JSON.stringify(u.name||"")},${JSON.stringify(u.role)},${JSON.stringify(u.staffTypes||[])})'>役職変更</button>` : ''}
+        ${canEditThisUser ? `<button class="btn btn-sm" onclick='openEditRoleModal(${JSON.stringify(u.email)},${JSON.stringify(u.name||"")},${JSON.stringify(u.role)},${JSON.stringify(u.staffTypes||[])})'>編集</button>` : ''}
         ${canAddDelete && u.email !== window._currentUser?.email ? `<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.email}','${u.name||u.email}')">削除</button>` : ''}
       </div>
     </div>`;
@@ -977,7 +1188,8 @@ const STAFF_TYPE_LABELS = { material_dev:'教材開発', sns_marketing:'SNSマ�
 // 役職変更モーダル
 function openEditRoleModal(email, name, currentRole, currentStaffTypes) {
   document.getElementById('edit-role-email').value = email;
-  document.getElementById('edit-role-user-name').textContent = `${name} (${email})`;
+  document.getElementById('edit-role-user-email').textContent = email;
+  document.getElementById('edit-role-name').value = name || '';
   document.getElementById('edit-role-msg').className = 'flash';
   // 選択可能な役職を設定
   const myRole = window._currentUser?.role || '';
@@ -1002,15 +1214,18 @@ function openEditRoleModal(email, name, currentRole, currentStaffTypes) {
 function closeEditRoleModal() { document.getElementById('edit-role-modal').classList.remove('open'); }
 async function submitEditRole() {
   const email   = document.getElementById('edit-role-email').value;
+  const newName = document.getElementById('edit-role-name').value.trim();
   const newRole = document.getElementById('edit-role-select').value;
   const typeArea = document.getElementById('edit-role-staff-types');
   const newTypes = typeArea
     ? Array.from(typeArea.querySelectorAll('input[type="checkbox"]:checked')).map(el => el.value)
     : [];
+  if (!newName) { showFlash('edit-role-msg','表示名を入力してください',false); return; }
   const ok = await window.updateUserRole(email, newRole);
   const ok2 = await window.updateStaffTypes(email, newTypes);
-  if (ok && ok2) {
-    showFlash('edit-role-msg','役職を変更しました',true);
+  const ok3 = await window.updateStaffName(email, newName);
+  if (ok && ok2 && ok3) {
+    showFlash('edit-role-msg','保存しました',true);
     setTimeout(() => { closeEditRoleModal(); renderAdminUserList(); }, 1000);
   } else {
     showFlash('edit-role-msg','変更に失敗しました',false);
@@ -1859,7 +2074,9 @@ async function checkConfirmedMTGShifts() {
   if (_mtgSyncInProgress) return; // onSnapshotの多重発火による重複実行を防止
   _mtgSyncInProgress = true;
   try {
-    const mtgList = await computeMTGReminders();
+    // ログイン時の確認処理では、自分に関係するMTGだけを絞り込んで取得する（全件読み込みを避けるため）
+    const myRelevantMTGs = window.fetchMyRelevantMTGs ? await window.fetchMyRelevantMTGs(myEmail) : null;
+    const mtgList = await computeMTGReminders(myRelevantMTGs);
     let changed = 0;
 
     // 既存のMTG由来シフト（mtgId未記録の古いデータ）に、内容が一致する確定MTGのIDを自動で後付けする
@@ -1987,6 +2204,76 @@ async function checkConfirmedMTGShifts() {
     }
   } catch(e) { console.warn('checkConfirmedMTGShifts error', e); }
   finally { _mtgSyncInProgress = false; }
+}
+
+// ── 研修記録の自動同期（ログイン時に実行） ──
+// 他人のシフトには書き込めない仕組みのため、MTGの確定シフトと同じ方式をとる。
+// 本人がアプリを開いたタイミングで、自分の研修出席記録をシフト（研修業務）へ反映し、
+// 昇格必須の研修をすべて合格していれば役職を自動的に「講師」へ更新する。
+let _trainingSyncInProgress = false;
+async function checkTrainingSync() {
+  if (_trainingSyncInProgress) return;
+  if (typeof window.fetchTrainingRecordsForStaff !== 'function') return;
+  const myEmail = window._currentUser?.email;
+  if (!myEmail) return;
+  _trainingSyncInProgress = true;
+  try {
+    const records = await window.fetchTrainingRecordsForStaff(myEmail);
+
+    // ① 出席かつ時刻が入力されている記録を、研修業務のシフトとして追加する
+    let changed = 0;
+    for (const r of records) {
+      if (!r.attended || !r.date || !r.shiftStart || !r.shiftEnd) continue;
+      const already = shifts.some(sh => sh.trainingRecordId === r.id);
+      if (already) continue;
+      let gcalEventId = null;
+      if (window._gcalToken) {
+        try {
+          const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+            method:'POST',
+            headers:{'Authorization':'Bearer '+window._gcalToken,'Content-Type':'application/json'},
+            body:JSON.stringify({
+              summary:`【研修】${r.itemName || '研修'}`,
+              start:{dateTime:`${r.date}T${r.shiftStart}:00`,timeZone:'Asia/Tokyo'},
+              end:{dateTime:`${r.date}T${r.shiftEnd}:00`,timeZone:'Asia/Tokyo'},
+              colorId:'5',
+              reminders:{useDefault:false,overrides:[{method:'popup',minutes:10}]}
+            })
+          });
+          const data = await res.json();
+          gcalEventId = data.id || null;
+        } catch(e) { console.warn('研修シフトのカレンダー登録に失敗', e); }
+      }
+      shifts.push({
+        id: Date.now()+Math.random(), type:'training', trainingRecordId: r.id,
+        date: r.date, start: r.shiftStart, end: r.shiftEnd,
+        memo: r.itemName || '研修', closed:false, gcalEventId
+      });
+      changed++;
+    }
+    if (changed > 0) { save(); renderShifts(); renderMetrics(); renderHome(); }
+
+    // ② 昇格必須の研修をすべて合格していれば、研修中→講師へ自動更新
+    if (window._currentUser?.role === 'trainee' && typeof window.fetchTrainingItems === 'function') {
+      const items = await window.fetchTrainingItems();
+      const helpers = window.__trainingHelpers;
+      if (helpers) {
+        const required = items.filter(it => it.isRequiredForPromotion && helpers.isTargetOf(it, window._currentUser));
+        const allPassed = required.length > 0 && required.every(it =>
+          records.some(r => r.itemId === it.id && r.result === 'pass')
+        );
+        if (allPassed && typeof window.updateUserRole === 'function') {
+          const ok = await window.updateUserRole(myEmail, 'instructor');
+          if (ok) {
+            window._currentUser.role = 'instructor';
+            if (typeof window.renderTabBar === 'function') window.renderTabBar();
+            alert('必須研修をすべて修了したため、役職が「講師」に更新されました。おめでとうございます！');
+          }
+        }
+      }
+    }
+  } catch(e) { console.warn('checkTrainingSync error', e); }
+  finally { _trainingSyncInProgress = false; }
 }
 
 async function loadQAFromFirebase() {
@@ -2230,7 +2517,9 @@ function init(){
 }
 init();
 
-if('serviceWorker' in navigator){
+// 開発サーバー(npm run dev)ではサービスワーカーを登録しない
+// (Viteのキャッシュ回避用クエリパラメータとかみ合わずエラーになるため。本番ビルドでは通常通り登録される)
+if('serviceWorker' in navigator && !import.meta.env.DEV){
   navigator.serviceWorker.register('sw.js').then(reg=>{
     reg.addEventListener('updatefound',()=>{
       const nw=reg.installing;
@@ -2245,8 +2534,8 @@ if('serviceWorker' in navigator){
 // Vite移行時の後方互換: HTMLのonclick属性やモジュール間の呼び出しから使えるようwindowに公開
 Object.assign(window, {
   addMTGCandidate, addMTGCandidateToGcal, addRateHistory, addShift, addShiftFromHome, autoCalcMTGEnd, buildWeekGrid,
-  calNextMonth, calPrevMonth, calcMonthPay, cancelMTG, changeMonth, changeYear, checkConfirmedMTGShifts, checkConflicts,
-  clearAll, closeAddPendingModal, closeAddUserModal, closeChatCatModal, closeEditModal, closeEditRoleModal, closeQAModal, closeUpdateInfoModal, computeMTGReminders, confirmMTG, copyInvoice, gotoStaffEvaluation,
+  calNextMonth, calPrevMonth, calcMonthPay, cancelMTG, changeMonth, changeYear, checkConfirmedMTGShifts, checkConflicts, checkTrainingSync,
+  clearAll, closeAddPendingModal, closeAddUserModal, closeChatCatModal, closeEditModal, closeEditRoleModal, closeMaintenancePopup, closeQAModal, closeUpdateInfoModal, computeMTGReminders, confirmMTG, copyInvoice, gotoStaffEvaluation,
   deleteChatCat, openAddChatCatModal, openAddPendingModal, openEditChatCatModal, openUpdateInfoModal, renderChatCatList, setMTGCandidateField, submitAddPending, submitChatCat,
   currentFavoriteTabs, deleteFromGcal, deleteMTGItem, deleteQA, deleteRateHistory, deleteShift, deleteUser, durationH,
   escapeEmail, executeBulk, exportData, finishMTG, formatTimeInput, generateInvoice, getConflictIds,
@@ -2256,7 +2545,7 @@ Object.assign(window, {
   removeMTGCandidate, renderAdminUserList, renderAll, renderAnnual, renderHome, renderHomeShifts,
   renderMTGCandidates, renderMTGDetail, renderMTGInvitees, renderMTGReminderUI, renderMTGTab, renderMetrics, renderMiniCal, renderQAList,
   renderRateHistory, renderShifts, save, saveEdit, saveGoal, saveLocal, savePayment, saveRates,
-  setMTGFilter, setMTGPersonFilter, showFlash, showMTGCreateForm, showMTGDetail, showMTGMainView, submitAddUser,
+  setMTGFilter, setMTGPersonFilter, selectHomeDate, showFlash, showMTGCreateForm, showMTGDetail, showMTGMainView, submitAddUser, submitMaintenanceAnnouncement, submitTemporaryMaintenance,
   submitCreateMTG, submitEditRole, submitMTGResponse, submitQA, switchTab, syncToGcal, tabMenuListHTML, toLocalDateStr,
   toMonthStr, toggleClose, toggleHomeAddForm, toggleMTGInvitee, unescapeEmail, visibleTabRegistry,
 });
