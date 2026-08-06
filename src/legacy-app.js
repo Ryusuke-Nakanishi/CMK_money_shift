@@ -1,11 +1,11 @@
-const APP_VERSION='3.7.6';
+const APP_VERSION='3.7.7';
 document.getElementById('ver-badge').textContent='v'+APP_VERSION+' 📢';
 document.getElementById('ver-display').textContent=APP_VERSION;
 
 // ── アップデート情報 ──
 // 新しい更新内容はこの配列の先頭に追加していく（新しい順に表示される）
 const CHANGELOG = [
-  { version:'3.6.0〜3.7.6', date:'2026-07-27', changes:[
+  { version:'3.6.0〜3.7.7', date:'2026-07-31', changes:[
     '研修機能を追加しました。「研修」タブから、ご自身が対象の研修の進捗（合格・挑戦中・未受講）を確認できます',
     '準ユニットリーダー以上は「研修管理」タブから、出欠・合否の記録ができます（記録できる役職は研修項目ごとに設定できます）',
     '研修項目は管理画面から自由に追加・編集でき、対象者は役職・担当コース・所属ユニットの組み合わせ、または個別指定で設定できます',
@@ -22,6 +22,7 @@ const CHANGELOG = [
     '毎月の定期メンテナンスとは別に、1回きりの「臨時メンテナンス」も案内できるようにしました（両方有効な場合は両方表示されます）',
     'メンテナンス告知に「この期間中、実際にアプリの使用を制限する」設定を追加しました。有効にすると、実施時間中はアプリ画面の操作ができなくなります（admin/operatorは対象外）',
     '（修正）使用制限中は管理者自身もログインできなくなる不具合を修正しました。ログイン自体は常に可能にし、ログイン後にアプリ側で役職を確認して制限するかどうかを判定するようにしました',
+    'キャンプの後、別のクラスが始まるまでの間が10分未満の場合に、やわらかい注意表示が出るようにしました（ダブルブッキングとは別の警告です）',
   ]},
   { version:'3.5.4', date:'2026-07-22', changes:[
     '講師評価機能を追加しました。ご自身の評価が「講師評価」から確認できます（評価者が公開するまでは非表示になります）',
@@ -759,7 +760,21 @@ function checkConflicts(){
   const sorted=[...shifts].filter(s=>!s.closed).sort((a,b)=>(a.date+a.start)<(b.date+b.start)?-1:1);
   const conflicts=[];
   for(let i=0;i<sorted.length-1;i++){const a=sorted[i],b=sorted[i+1];if(a.date===b.date&&a.end>b.start)conflicts.push(`${a.date.slice(5).replace('-','/')} ${TYPE_LABEL[a.type]}(${a.start}〜${a.end}) と ${TYPE_LABEL[b.type]}(${b.start}〜${b.end})`);}
-  const html=conflicts.length?`<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`:'';
+  let html=conflicts.length?`<div class="alert alert-danger">⚠ ダブルブッキングがあります！<br>${conflicts.map(c=>`• ${c}`).join('<br>')}</div>`:'';
+  // キャンプ終了後、別のクラス(MTG・キャンプ以外)が10分未満で始まる場合のやわらかい警告
+  // (キャンプは終了時刻が伸びやすく、次のクラスには数分の入室準備が必要なため)
+  const toMin=(t)=>{const[h,m]=t.split(':').map(Number);return h*60+m;};
+  const campWarnings=[];
+  for(let i=0;i<sorted.length-1;i++){
+    const a=sorted[i],b=sorted[i+1];
+    if(a.date!==b.date)continue;
+    if(a.type!=='camp')continue;
+    if(b.type==='camp'||b.type==='mtg')continue;
+    if(a.end>b.start)continue; // 重なっている場合はダブルブッキング側の警告に任せる
+    const gap=toMin(b.start)-toMin(a.end);
+    if(gap>=0&&gap<10)campWarnings.push(`${a.date.slice(5).replace('-','/')} キャンプ(〜${a.end})の後、${TYPE_LABEL[b.type]}(${b.start}〜)まで${gap}分しかありません`);
+  }
+  if(campWarnings.length)html+=`<div class="alert" style="background:var(--warning-bg);color:var(--warning-text);border-radius:var(--radius-sm);padding:10px 14px;margin-top:${conflicts.length?'8px':'0'}">⚠ キャンプの後の準備時間が短いかもしれません<br>${campWarnings.map(c=>`• ${c}`).join('<br>')}</div>`;
   const zone=document.getElementById('conflict-zone');
   if(zone)zone.innerHTML=html;
   const homeZone=document.getElementById('home-conflict-zone');
